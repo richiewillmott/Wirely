@@ -32,7 +32,8 @@ if IN_BROWSER:                                     # measure text with the brows
 from PySide6.QtCore import QPointF, QRectF, Qt                       # noqa: E402  (the shim)
 from PySide6.QtGui import QColor, QPainter                           # noqa: E402
 
-from wirely import __version__                                      # noqa: E402
+from wirely import __version__, i18n                               # noqa: E402
+from wirely.i18n import tr, trn                                      # noqa: E402
 from wirely.model import parts as P                                  # noqa: E402
 from wirely.model.circuit import Circuit                             # noqa: E402
 from wirely.model.types_info import describe                         # noqa: E402
@@ -202,8 +203,8 @@ class App:
         self.status = text
 
     def _on_sim_message(self, cid, text):
-        kind = "error" if ("popped" in text or "blew" in text or "burnt" in text) else "warn"
-        self.toasts.append([text, kind])
+        # a part that has broken is an error; a warning is something that can still be put right
+        self.toasts.append([text, "error" if self.simc.is_broken(cid) else "warn"])
 
     def _on_sim_state(self, state):
         if state == "stopped":
@@ -213,9 +214,9 @@ class App:
             self.status = ""
             self.synth.silence_all()
         elif state == "running":
-            self.status = "Running — click switches, drag sliders, hover over wires to read voltages."
+            self.status = tr("Running — click switches, drag sliders, hover over wires to read voltages.")
         else:
-            self.status = "Paused — press Play to carry on, or Stop to edit."
+            self.status = tr("Paused — press Play to carry on, or Stop to edit.")
 
     # ------------------------------------------------------------------ files
     def _set_circuit(self, circuit, name):
@@ -239,12 +240,12 @@ class App:
         try:
             d = json.loads(text)
             if d.get("app") not in ("Wirely", "Sparkbench"):
-                raise ValueError("This isn't a Wirely circuit file.")
+                raise ValueError(tr("This isn't a Wirely circuit file."))
             if int(d.get("version", 1)) > 1:
-                raise ValueError("This file was saved by a newer version of Wirely — please update.")
+                raise ValueError(tr("This file was saved by a newer version of Wirely — please update."))
             c = Circuit.from_dict(d)
         except Exception as e:                   # noqa: BLE001 - show any problem to the user
-            return f"Couldn't open {name}: {e}"
+            return tr("Couldn't open {name}: {e}", name=name, e=e)
         self._set_circuit(c, name)
         return ""
 
@@ -264,7 +265,7 @@ class App:
 
     def bom_csv(self):
         rows = self.circuit.bill_of_materials()
-        out = ["Qty,Part,Labels"]
+        out = [",".join((tr("Qty"), tr("Part"), tr("Labels")))]
         for r in rows:
             out.append(f'{r["qty"]},"{r["description"]}","{" ".join(r["refs"])}"')
         return "\n".join(out)
@@ -389,7 +390,7 @@ class App:
     # ------------------------------------------------------------------ actions (toolbar, menus, keys)
     def start_placing(self, kind, keep=False):
         if self.simc.active():
-            self.toasts.append(["Press Stop to go back to editing, then add the part.", "info"])
+            self.toasts.append([tr("Press Stop to go back to editing, then add the part."), "info"])
             return
         self.scene.start_placing(kind, keep=bool(keep))
 
@@ -488,9 +489,10 @@ class App:
             "undo": self.hi > 0 and not running, "redo": self.hi < len(self.history) - 1 and not running,
             "paste": bool(self.clip) and not running, "volts": sc.show_volts, "flow": sc.show_flow, "readings": sc.show_readings,
             "sound": self.sound_on, "graph": self.graph_on, "grid": sc.show_grid, "dark": theme.MODE == "dark", "us": S.STYLE == "us",
-            "dirty": self.is_dirty(), "name": self.name, "empty": self.circuit.is_empty(),
-            "counts": f"{n} part{'s' * (n != 1)} · {w} wire{'s' * (w != 1)}",
-            "status": self.status or (EMPTY_HINT if not running else ""),
+            "dirty": self.is_dirty(), "name": tr("Untitled") if self.name == "Untitled" else self.name,
+            "untitled": self.name == "Untitled", "empty": self.circuit.is_empty(),
+            "counts": trn("{n} part", "{n} parts", n) + " · " + trn("{n} wire", "{n} wires", w),
+            "status": self.status or (tr(EMPTY_HINT) if not running else ""),
             "wiring": sc._wiring is not None,
         })
 
@@ -504,22 +506,22 @@ class App:
             if not item.isSelected():
                 sc.clearSelection()
                 item.setSelected(True)
-            menu.append(["Properties…", "props", "Enter"])
+            menu.append([tr("Properties…"), "props", "Enter"])
             if not running:
-                menu += [None, ["Rotate", "rotate", "R"], ["Rotate anticlockwise", "rotate_ccw", "Shift+R"],
-                         ["Flip", "flip", "F"], None, ["Duplicate", "duplicate", "Ctrl+D"], ["Copy", "copy", "Ctrl+C"],
-                         ["Cut", "cut", "Ctrl+X"], ["Delete", "delete", "Del"]]
+                menu += [None, [tr("Rotate"), "rotate", "R"], [tr("Rotate anticlockwise"), "rotate_ccw", "Shift+R"],
+                         [tr("Flip"), "flip", "F"], None, [tr("Duplicate"), "duplicate", "Ctrl+D"],
+                         [tr("Copy"), "copy", "Ctrl+C"], [tr("Cut"), "cut", "Ctrl+X"], [tr("Delete"), "delete", "Del"]]
         elif isinstance(item, WireItem) and not running:
             if not item.isSelected():
                 sc.clearSelection()
                 item.setSelected(True)
-            menu.append(["Delete", "delete", "Del"])
+            menu.append([tr("Delete"), "delete", "Del"])
         elif not running:
-            menu += [["Paste", "paste", "Ctrl+V"], ["Select all", "select_all", "Ctrl+A"], None,
-                     ["Zoom to fit", "fit", "Ctrl+0"]]
+            menu += [[tr("Paste"), "paste", "Ctrl+V"], [tr("Select all"), "select_all", "Ctrl+A"], None,
+                     [tr("Zoom to fit"), "fit", "Ctrl+0"]]
         else:
-            menu.append(["Pause", "pause", "F6"] if self.simc.state == "running" else ["Run", "play", "F5"])
-            menu.append(["Stop", "stop", "F7"])
+            menu.append([tr("Pause"), "pause", "F6"] if self.simc.state == "running" else [tr("Run"), "play", "F5"])
+            menu.append([tr("Stop"), "stop", "F7"])
         return json.dumps(menu)
 
     # ------------------------------------------------------------------ the properties box
@@ -531,14 +533,15 @@ class App:
         fields = []
         for p in part.props:
             v = comp.value(p.key)
-            f = {"key": p.key, "label": p.label, "kind": p.kind, "help": p.help}
+            f = {"key": p.key, "label": p.tr_label, "kind": p.kind, "help": p.tr_help}
             if p.kind == "bool":
                 f["value"] = bool(v)
             elif p.kind == "text":
                 f["value"] = str(v)
             elif p.kind == "choice":
                 f["value"] = str(v)
-                f["choices"] = list(p.choices)
+                f["choices"] = list(p.choices)                    # the values that get saved (English)
+                f["choice_labels"] = [P.choice_text(ch) for ch in p.choices]      # what the person reads
                 if p.key == "colour":
                     f["colours"] = {ch: S.LED_RGB[ch] for ch in p.choices if ch in S.LED_RGB}
                 if p.key == "model":
@@ -547,14 +550,14 @@ class App:
                 # the number, with a box beside it for its size: Ω / kΩ / MΩ, pF / nF / µF …
                 f["value"], f["unit"] = split(float(v), p.unit)
                 f["units"] = unit_choices(p.unit)
-                f["placeholder"] = f"e.g. {split(float(p.default), p.unit)[0]}"
-                f["help"] = p.help or "Type the number and pick its size — or type it all, like 4k7 or 100n"
+                f["placeholder"] = tr("e.g. {value}", value=split(float(p.default), p.unit)[0])
+                f["help"] = p.tr_help or tr("Type the number and pick its size — or type it all, like 4k7 or 100n")
             else:
                 f["value"] = fmt(v, p.unit)
-                f["placeholder"] = f"e.g. {fmt(p.default, p.unit)}"
-                f["help"] = p.help or "Type values like 10k, 4k7, 2M2, 100n, 4.7µ"
+                f["placeholder"] = tr("e.g. {value}", value=fmt(p.default, p.unit))
+                f["help"] = p.tr_help or tr("Type values like 10k, 4k7, 2M2, 100n, 4.7µ")
             fields.append(f)
-        return json.dumps({"id": cid, "ref": comp.ref, "name": part.name, "description": part.description,
+        return json.dumps({"id": cid, "ref": comp.ref, "name": part.tr_name, "description": part.tr_description,
                            "fields": fields, "kind": comp.kind,
                            "icon": self._icon_ops(comp.kind, 76, 50, comp.props, theme.PANEL)})
 
@@ -577,19 +580,19 @@ class App:
                     else:
                         v = parse(raw, p.unit)
                     if p.min is not None and v < p.min:
-                        raise ValueError(f"{p.label} must be at least {fmt(p.min, p.unit)}")
+                        raise ValueError(tr("{label} must be at least {value}", label=p.tr_label, value=fmt(p.min, p.unit)))
                     if p.max is not None and v > p.max:
-                        raise ValueError(f"{p.label} can be at most {fmt(p.max, p.unit)}")
+                        raise ValueError(tr("{label} can be at most {value}", label=p.tr_label, value=fmt(p.max, p.unit)))
                     out[p.key] = v
                 except ValueError as e:
                     problems.append(str(e))
                     bad.append(p.key)
         ref = str(values.get("_ref", comp.ref)).strip()
         if not ref:
-            problems.append("The label can't be empty")
+            problems.append(tr("The label can't be empty"))
             bad.append("_ref")
         elif any(c.ref == ref and c.id != comp.id for c in self.circuit.components.values()):
-            problems.append(f"Another part is already called {ref}")
+            problems.append(tr("Another part is already called {ref}", ref=ref))
             bad.append("_ref")
         return out, ref, problems, bad
 
@@ -640,7 +643,7 @@ class App:
             self.simc.pause()
             return ""
         if self.circuit.is_empty():
-            self.toasts.append(["Add some parts and wire them up first — then press Play.", "info"])
+            self.toasts.append([tr("Add some parts and wire them up first — then press Play."), "info"])
             return ""
         sc.cancel()
         sc.set_mode("select")
@@ -651,7 +654,7 @@ class App:
             self.simc.start(self.circuit)
         except Exception as e:                 # noqa: BLE001 - never crash the editor because of a bad circuit
             self.simc.stop()
-            self.toasts.append([f"The simulation couldn't start: {e}", "error"])
+            self.toasts.append([tr("The simulation couldn't start:") + f" {e}", "error"])
             return str(e)
         return ""
 
@@ -663,7 +666,7 @@ class App:
         self.simc.set_speed(float(s))
 
     def speeds(self):
-        return json.dumps(SC.SPEEDS)
+        return json.dumps([[tr(n), v] for n, v in SC.SPEEDS])
 
     def tick(self):
         """One step of the running simulation (the page calls this about 30 times a second)."""
@@ -674,7 +677,7 @@ class App:
             self.simc._tick()
         except Exception as e:                 # noqa: BLE001
             self.simc.stop()
-            self.toasts.append([f"The simulation stopped: {e}", "error"])
+            self.toasts.append([tr("The simulation stopped:") + f" {e}", "error"])
         if self.simc.live.samples or self.simc.active():
             if self.simc.live.samples:
                 self.graph.add_samples(self.simc.live.samples, self.simc.live.t)
@@ -688,7 +691,7 @@ class App:
         txt = f"t = {t:.2f} s" if t < 100 else f"t = {t:.0f} s"
         behind = self.simc.behind and self.simc.state == "running"
         if behind:
-            txt += "  · slowed"
+            txt += "  · " + tr("slowed")
         sound = []
         if self.sound_on and self.simc.state == "running":
             for key, v in self.synth.voices.items():
@@ -848,19 +851,19 @@ class App:
         self.graph.clear()
 
     def graph_choices(self):
-        return json.dumps({"time": [n for n, _v in TIMEBASES], "volts": [n for n, _v in VOLTS]})
+        return json.dumps({"time": [tr(n) for n, _v in TIMEBASES], "volts": [tr(n) for n, _v in VOLTS]})
 
     def graph_csv(self):
         """The recorded graph probe voltages as a spreadsheet (CSV): one row per time."""
-        chans = sorted(ch for ch, tr in self.graph.traces.items() if tr.t)
+        chans = sorted(ch for ch, trace in self.graph.traces.items() if trace.t)
         if not chans:
             return ""
         rows = {}
         for ch in chans:
-            tr = self.graph.traces[ch]
-            for t, v in zip(tr.t, tr.v):
+            trace = self.graph.traces[ch]
+            for t, v in zip(trace.t, trace.v):
                 rows.setdefault(t, {})[ch] = v
-        out = ["time (s)," + ",".join(f"{ch} (V)" for ch in chans)]
+        out = [tr("time (s)") + "," + ",".join(f"{ch} (V)" for ch in chans)]
         for t in sorted(rows):
             out.append(f"{t:.9g}," + ",".join(f"{rows[t][ch]:.6g}" if ch in rows[t] else "" for ch in chans))
         return "\n".join(out)
@@ -886,9 +889,9 @@ class App:
     def gallery(self, w=62, h=40):
         cats = []
         for cat, parts in P.by_category():
-            cats.append({"name": cat, "parts": [
-                {"key": pd.key, "tile": pd.tile_name, "name": pd.name, "description": pd.description,
-                 "keywords": pd.keywords, "icon": self._icon_ops(pd.key, w, h)} for pd in parts]})
+            cats.append({"name": tr(cat), "search": (cat + " " + tr(cat)).lower(), "parts": [
+                {"key": pd.key, "tile": pd.tr_tile_name, "name": pd.tr_name, "description": pd.tr_description,
+                 "keywords": pd.search_text, "icon": self._icon_ops(pd.key, w, h)} for pd in parts]})
         return json.dumps(cats)
 
     def toolbar_icons(self, names_json):
@@ -927,6 +930,26 @@ class App:
 
     def version(self):
         return __version__
+
+    # ------------------------------------------------------------------ language
+    def languages(self):
+        return json.dumps(i18n.LANGUAGES)
+
+    def set_language(self, code):
+        """Show everything in this language from now on. Returns the code in use. Messages already waiting are
+        dropped (they were written in the old language) and the status line is written again."""
+        code = i18n.set_language(code)
+        self.scene.retranslate()
+        self.toasts = []
+        if self.simc.state == "stopped":
+            self.status = ""
+        else:
+            self._on_sim_state(self.simc.state)
+        return code
+
+    def catalogue(self, code=None):
+        """The {English: translation} map for a language, for the page's own text."""
+        return json.dumps(i18n.catalogue(code or i18n.language()), ensure_ascii=False)
 
 
 def selftest():

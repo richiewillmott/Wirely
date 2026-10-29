@@ -10,6 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 
+from ..i18n import tr
 from . import parts as P
 
 FILE_VERSION = 1
@@ -362,11 +363,11 @@ class Circuit:
             if c.kind in ("ground", "note"):
                 continue
             part = c.part
-            desc = [part.name]
+            desc = [part.tr_name]
             for p in part.props:
                 if p.on_label:
                     v = c.value(p.key)
-                    desc.append(fmt(v, p.unit) if p.kind == "number" else str(v))
+                    desc.append(fmt(v, p.unit) if p.kind == "number" else tr(str(v)))
             key = tuple(desc)
             rows.setdefault(key, {"description": " ".join(desc), "refs": [], "qty": 0})
             rows[key]["refs"].append(c.ref)
@@ -404,9 +405,9 @@ class Circuit:
         with open(path, "r", encoding="utf-8") as fh:
             d = json.load(fh)
         if d.get("app") not in ("Wirely", "Sparkbench"):        # Sparkbench was Wirely's working name
-            raise ValueError("This isn't a Wirely circuit file.")
+            raise ValueError(tr("This isn't a Wirely circuit file."))
         if int(d.get("version", 1)) > FILE_VERSION:
-            raise ValueError("This file was saved by a newer version of Wirely — please update.")
+            raise ValueError(tr("This file was saved by a newer version of Wirely — please update."))
         return cls.from_dict(d)
 
     def bounds(self):

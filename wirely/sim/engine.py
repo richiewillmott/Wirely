@@ -19,6 +19,7 @@ import time
 
 import numpy as np
 
+from ..i18n import tr
 from ..model.circuit import Circuit
 from . import chips as CH
 from . import devices as D
@@ -187,14 +188,14 @@ class Simulator:
             except np.linalg.LinAlgError:
                 xn = np.linalg.lstsq(A, b, rcond=None)[0]
             if not np.all(np.isfinite(xn)):
-                raise ConvergenceError("numbers ran away")
+                raise ConvergenceError(tr("numbers ran away"))
             dx = np.abs(xn - x)
             x = xn
             if not self.nonlinear:
                 return x
             if not ctx.limited and np.all(dx <= self.ABSTOL + self.RELTOL * np.abs(x)):
                 return x
-        raise ConvergenceError("no convergence")
+        raise ConvergenceError(tr("no convergence"))
 
     def dc(self):
         """Steady DC answer with capacitors as open circuits (used by tests and for starting points)."""
@@ -252,7 +253,7 @@ class Simulator:
                 x = self._solve_once(self.x, ctx)
                 dv = float(np.max(np.abs(x[:self.n_nodes] - self.x[:self.n_nodes]))) if self.n_nodes else 0.0
                 if self.reactive and dv > 2 * dv_max and h > 1e-9 and not self._jump:
-                    raise ConvergenceError("too big a change")
+                    raise ConvergenceError(tr("too big a change"))
                 # something switches inside this step: shorten the step to land on the switching moment
                 if self.switchers and tries < 6 and h > 2e-9:
                     fr = [f for f in (d.crossing(self.x, x, self.t, self.t + h) for d in self.switchers)

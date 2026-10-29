@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..i18n import language, tr
+
 GRID = 10
 
 
@@ -25,6 +27,16 @@ class Prop:
     min: float | None = None
     max: float | None = None
     help: str = ""
+
+    # What the person reads: the English above, in the language they chose. The English stays the key that is
+    # saved in circuit files, so these are for showing only.
+    @property
+    def tr_label(self):
+        return tr(self.label)
+
+    @property
+    def tr_help(self):
+        return tr(self.help) if self.help else ""
 
 
 @dataclass(frozen=True)
@@ -43,6 +55,34 @@ class PartDef:
     @property
     def tile_name(self):
         return self.short or self.name
+
+    # shown to the person, in their language (the English fields stay the keys used in saved files)
+    @property
+    def tr_name(self):
+        return tr(self.name)
+
+    @property
+    def tr_name_lower(self):
+        """The name for the middle of a sentence: lower case in English and Spanish, as written in German (nouns
+        keep their capital) and Japanese (no case)."""
+        return self.tr_name.lower() if language() in ("en", "es") else self.tr_name
+
+    @property
+    def tr_tile_name(self):
+        return tr(self.tile_name)
+
+    @property
+    def tr_description(self):
+        return tr(self.description)
+
+    @property
+    def tr_category(self):
+        return tr(self.category)
+
+    @property
+    def search_text(self):
+        """Everything the gallery search matches: the names in English and in the chosen language, and keywords."""
+        return " ".join([self.name, self.tile_name, tr(self.name), tr(self.tile_name), self.keywords]).lower()
 
     def prop(self, key):
         for p in self.props:
@@ -70,6 +110,11 @@ CATEGORIES = [
 ]
 
 LED_COLOURS = ("Red", "Green", "Yellow", "Blue", "White", "Orange")
+
+
+def choice_text(value):
+    """A choice value ("Red", "Sine", "BC547" …) as shown to the person. Part numbers stay as they are."""
+    return tr(str(value))
 
 TWO = (("1", -30, 0), ("2", 30, 0))           # standard two-pin part, 60 units long
 TWO_POL = (("+", -30, 0), ("-", 30, 0))       # polarised: + on the left

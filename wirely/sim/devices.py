@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import math
 
+from ..i18n import tr
+
 VT = 0.025852          # thermal voltage at 300 K
 GMIN = 1e-12           # tiny conductance across every junction (as SPICE)
 R_ON, R_OFF = 0.01, 1e12      # an open switch leaks only a few picoamps
@@ -278,8 +280,9 @@ class Resistor(Resistive):
         self.warn = "hot" if self.heat > self.rating else None
         if self.heat > 2 * self.rating or self.power > 1000 * self.rating:
             self.blown = True
-            self.event = (f"{self.comp.ref} burnt out — {self.power:.2f} W is far more than its "
-                          f"{self.rating:g} W rating.")
+            self.event = tr("{ref} burnt out — {power:.2f} W is far more than its "
+                            "{rating:g} W rating.",
+                            ref=self.comp.ref, power=self.power, rating=self.rating)
 
 
 class VarResistor(Resistive):
@@ -333,7 +336,8 @@ class Fuse(Resistive):
         i = abs(self.i_pins[0])
         if not self.blown and self._overload(i > self.rating, ctx.h, 0.02, i > 3 * self.rating):
             self.blown = True
-            self.event = f"{self.comp.ref} blew — {i:.2f} A is more than its {self.rating:g} A rating."
+            self.event = tr("{ref} blew — {i:.2f} A is more than its {rating:g} A rating.",
+                            ref=self.comp.ref, i=i, rating=self.rating)
 
 
 class Switch(Resistive):
@@ -424,8 +428,9 @@ class Source(Device):
         self.warn = "short" if short else None
         if short and not getattr(self, "_short_told", False):
             self._short_told = True
-            self.event = (f"{self.comp.ref} is short-circuited — current is flowing straight from + to − "
-                          f"({abs(i_out):.1f} A).")
+            self.event = tr("{ref} is short-circuited — current is flowing straight from + to − "
+                            "({i_out:.1f} A).",
+                            ref=self.comp.ref, i_out=abs(i_out))
 
 
 class Capacitor(Device):
@@ -473,8 +478,8 @@ class Capacitor(Device):
             bad = vd < -1.0 or vd > 1.2 * self.vmax
             if self._overload(bad, ctx.h, 0.1):
                 self.blown = True
-                why = "it's connected the wrong way round" if vd < 0 else f"{vd:.1f} V is over its rating"
-                self.event = f"{self.comp.ref} popped — {why}."
+                why = tr("it's connected the wrong way round") if vd < 0 else tr("{vd:.1f} V is over its rating", vd=vd)
+                self.event = tr("{ref} popped — {why}.", ref=self.comp.ref, why=why)
 
 
 class RsDiode:
@@ -598,10 +603,13 @@ class Diode(Device):
         if self._overload(over, ctx.h, 0.03, abs(i) > 30 * self.imax or
                           self._surge > getattr(self, "surge_time", 1e-3)):
             self.blown = True
-            what = "LED" if self.comp.kind == "led" else "diode"
-            hint = " Add a resistor in series to limit the current." if self.comp.kind == "led" else ""
-            self.event = (f"{self.comp.ref} popped! {abs(i) * 1000:.0f} mA is too much for this {what} "
-                          f"(max {self.imax * 1000:.0f} mA).{hint}")
+            if self.comp.kind == "led":
+                self.event = tr("{ref} popped! {i:.0f} mA is too much for this LED (max {imax:.0f} mA). "
+                                "Add a resistor in series to limit the current.",
+                                ref=self.comp.ref, i=abs(i) * 1000, imax=self.imax * 1000)
+            else:
+                self.event = tr("{ref} popped! {i:.0f} mA is too much for this diode (max {imax:.0f} mA).",
+                                ref=self.comp.ref, i=abs(i) * 1000, imax=self.imax * 1000)
 
     def light_now(self):
         if self.comp is None or self.comp.kind != "led":
@@ -706,14 +714,17 @@ class BJT(Device):
         self.warn = "over" if (abs(self.ic) > self.icmax or self.power > self.pmax) else None
         if self._overload(bad, ctx.h, 0.2, abs(self.ic) > 5 * self.icmax):
             self.blown = True
-            self.event = (f"{self.comp.ref} burnt out — {abs(self.ic) * 1000:.0f} mA / {self.power:.2f} W is "
-                          f"too much for a {self.prop('model')} (max {self.icmax * 1000:.0f} mA). "
-                          "Add a resistor to its base or load.")
+            self.event = tr("{ref} burnt out — {ic:.0f} mA / {power:.2f} W is "
+                            "too much for a {model} (max {icmax:.0f} mA). "
+                            "Add a resistor to its base or load.",
+                            ref=self.comp.ref, ic=abs(self.ic) * 1000, power=self.power, model=self.prop('model'),
+                            icmax=self.icmax * 1000)
 
 
 def spike_message(ref, volts, vmax):
-    return (f"{ref} was destroyed by a {volts:.0f} V spike — more than its {vmax:.0f} V limit. If it switches a "
-            "relay coil, motor or inductor, put a diode across the coil (pointing towards +) to catch the spike.")
+    return tr("{ref} was destroyed by a {volts:.0f} V spike — more than its {vmax:.0f} V limit. If it switches a "
+              "relay coil, motor or inductor, put a diode across the coil (pointing towards +) to catch the spike.",
+              ref=ref, volts=volts, vmax=vmax)
 
 
 class Lamp(Device):
@@ -804,7 +815,8 @@ class Lamp(Device):
         rad = self.radiated()
         if self._overload(rad > 1.6, h, 0.2, rad > 4.0):
             self.blown = True
-            self.event = f"{self.comp.ref} blew — its filament can't take {rad * self.Prated:.1f} W."
+            self.event = tr("{ref} blew — its filament can't take {watts:.1f} W.",
+                            ref=self.comp.ref, watts=rad * self.Prated)
 
     def after_dc(self):
         pass
@@ -910,8 +922,9 @@ class Motor(Device):
         # too much voltage: it spins far too fast and the brushes and windings overheat
         if self._overload(abs(vd) > 2.0 * self.V, h, 1.0, abs(vd) > 6.0 * self.V and self._over > 0.05):
             self.blown = True
-            self.event = (f"{self.comp.ref} burnt out — {abs(vd):.0f} V is far too much for a {self.V:g} V motor: "
-                          "it spun much too fast and overheated.")
+            self.event = tr("{ref} burnt out — {vd:.0f} V is far too much for a {V:g} V motor: "
+                            "it spun much too fast and overheated.",
+                            ref=self.comp.ref, vd=abs(vd), V=self.V)
 
 
 class Voltmeter(Resistive):

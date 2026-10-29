@@ -117,11 +117,15 @@ def main():
     opener = _FileOpener(app)
     app.setApplicationName("Wirely")
     app.setOrganizationName("Wirely")
+    from wirely.ui import lang
+    lang.apply(lang.saved())            # the language chosen last time, before anything is shown
     splash = None if snapshot else __import__("wirely.ui.splash", fromlist=["show_splash"]).show_splash()
+
+    from wirely.i18n import tr
 
     def step(text, frac):
         if splash is not None:
-            splash.step(text, frac)
+            splash.step(tr(text), frac)
     step("Loading the parts library…", 0.2)
     from wirely.model import parts  # noqa: F401
     step("Loading the circuit solver…", 0.4)

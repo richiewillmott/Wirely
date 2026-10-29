@@ -5,14 +5,15 @@ import glob
 import os
 
 from PySide6.QtCore import QMimeData, QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence, QUndoCommand, QUndoStack
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QUndoCommand, QUndoStack
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMenu,
                                QMessageBox, QSplitter, QToolButton, QVBoxLayout, QWidget)
 
-from .. import APP_NAME, REVISION, __version__
+from .. import APP_NAME, REVISION, __version__, i18n
+from ..i18n import tr, trn
 from ..model.circuit import FILE_EXT, Circuit
 from . import export as EX
-from . import icons, theme
+from . import icons, lang, theme
 from . import symbols as S
 from .dialogs import BomDialog, PropertiesDialog, ShortcutsDialog
 from .gallery import Gallery
@@ -24,7 +25,10 @@ from .view import CircuitView
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EXAMPLES = os.path.join(ROOT, "examples")
-FILE_FILTER = f"Wirely circuits (*{FILE_EXT} *.spark)"
+
+
+def file_filter():
+    return tr("Wirely circuits") + f" (*{FILE_EXT} *.spark)"
 
 
 class Snapshot(QUndoCommand):
@@ -60,6 +64,8 @@ class MainWindow(QMainWindow):
         self._last = self.circuit.to_dict()
         self._paste_n = 0
         self._tool_buttons = {}
+        self._action_src = {}       # action -> (English text, English tip, shortcut), so it can be re-shown
+        self._menu_buttons = []     # (button, English menu name)
         self._build_ui()
         self.scene.edited.connect(self._on_edited)
         self.scene.editRequested.connect(self.edit_part)
@@ -137,7 +143,7 @@ class MainWindow(QMainWindow):
         self._hint("")
 
     def _act(self, text, slot, shortcut=None, icon=None, tip=None, checkable=False):
-        a = QAction(text, self)
+        a = QAction(self)
         if shortcut:
             a.setShortcuts([QKeySequence(s) for s in (shortcut if isinstance(shortcut, (list, tuple))
                                                       else [shortcut])])
@@ -145,14 +151,21 @@ class MainWindow(QMainWindow):
             a.setIcon(icons.icon(icon))
             a.setData(icon)
         a.setCheckable(checkable)
-        tip = tip or text.replace("…", "").replace("&", "")
+        self._action_src[a] = (text, tip, shortcut)
+        self._retr_action(a)
+        a.triggered.connect(slot)
+        self.addAction(a)
+        return a
+
+    def _retr_action(self, a):
+        """(Re)write an action's name and tooltip in the current language."""
+        text, tip, shortcut = self._action_src[a]
+        a.setText(tr(text))
+        tip = tr(tip) if tip else a.text().replace("…", "").replace("&", "")
         if shortcut:
             first = shortcut[0] if isinstance(shortcut, (list, tuple)) else shortcut
             tip += f"  ({QKeySequence(first).toString(QKeySequence.NativeText)})"
         a.setToolTip(tip)
-        a.triggered.connect(slot)
-        self.addAction(a)
-        return a
 
     def _make_actions(self):
         A = self._act
@@ -195,7 +208,7 @@ class MainWindow(QMainWindow):
                       "Draw parts the American way (zigzag resistors) instead of the British way", checkable=True)
         self.a_us.setChecked(S.STYLE == "us")
         self.a_help = A("Mouse and keyboard…", lambda: ShortcutsDialog(self).exec(), "F1")
-        self.a_about = A(f"About {APP_NAME}", self.about)
+        self.a_about = A("About Wirely", self.about)
         self.a_play = A("Run", self.sim_run, "F5", "play", "Run the circuit — watch it work")
         self.a_pause = A("Pause", self.sim_pause, "F6", "pause", "Pause the simulation")
         self.a_stop = A("Stop", self.sim_stop, ["Shift+F5", "F7"], "stop", "Stop and go back to editing")
@@ -218,6 +231,17 @@ class MainWindow(QMainWindow):
         self.a_volts.setChecked(self.settings.value("volts", "true") == "true")
         self.a_flow.setChecked(self.settings.value("flow", "true") == "true")
         self.a_readings.setChecked(self.settings.value("readings", "false") == "true")
+        # one checkable entry per language, each in its own language so it can always be found again
+        self.lang_group = QActionGroup(self)
+        self.lang_group.setExclusive(True)
+        self.lang_actions = {}
+        for code, native in i18n.LANGUAGES:
+            la = QAction(native, self)
+            la.setCheckable(True)
+            la.setChecked(code == i18n.language())
+            la.triggered.connect(lambda _checked=False, c=code: self.set_language(c))
+            self.lang_group.addAction(la)
+            self.lang_actions[code] = la
 
     def _tool(self, action, text_beside=False):
         b = QToolButton()
@@ -260,6 +284,7 @@ class MainWindow(QMainWindow):
             ("Simulate", [self.a_play, self.a_pause, self.a_stop, None, self.a_volts, self.a_flow, self.a_readings, self.a_copy_readings,
                           self.a_graph, self.a_sound]),
             ("View", [self.a_zoom_in, self.a_zoom_out, self.a_fit, None, self.a_grid, self.a_dark, self.a_us]),
+            ("Language", list(self.lang_actions.values())),
             ("Help", [self.a_help, self.a_about]),
         ):
             m = QMenu(self)
@@ -267,28 +292,29 @@ class MainWindow(QMainWindow):
                 if a is None:
                     m.addSeparator()
                 elif a == "examples":
-                    self.examples_menu = m.addMenu("Open example")
+                    self.examples_menu = m.addMenu(tr("Open example"))
                     self._fill_examples()
                 elif a == "recent":
-                    self.recent_menu = m.addMenu("Open recent")
+                    self.recent_menu = m.addMenu(tr("Open recent"))
                     self.recent_menu.aboutToShow.connect(self._fill_recent)
                 else:
                     m.addAction(a)
             b = QToolButton()
             b.setObjectName("menuButton")
-            b.setText(name)
+            b.setText(tr(name))
+            self._menu_buttons.append((b, name))
             b.setMenu(m)
             b.setPopupMode(QToolButton.InstantPopup)
             h.addWidget(b)
             self.menus[name] = m
         h.addSpacing(18)
-        self.docname = QLabel("Untitled")
+        self.docname = QLabel(tr("Untitled"))
         self.docname.setObjectName("docname")
         h.addWidget(self.docname)
         h.addStretch(1)
-        tip = QLabel("Wheel: zoom · Middle-drag: pan · Double-click a part to change it")
-        tip.setObjectName("muted")
-        h.addWidget(tip)
+        self.tip_label = QLabel(tr("Wheel: zoom · Middle-drag: pan · Double-click a part to change it"))
+        self.tip_label.setObjectName("muted")
+        h.addWidget(self.tip_label)
         return bar
 
     def _build_toolbar(self):
@@ -320,10 +346,10 @@ class MainWindow(QMainWindow):
             sh.addWidget(T(a))
         sh.addSpacing(6)
         self.speed_box = QComboBox()
-        self.speed_box.setToolTip("Simulation speed")
+        self.speed_box.setToolTip(tr("Simulation speed"))
         for name, _v in SPEEDS:
-            self.speed_box.addItem(name)
-        self.speed_box.setCurrentText("Real time")
+            self.speed_box.addItem(tr(name))
+        self.speed_box.setCurrentIndex([n for n, _v in SPEEDS].index("Real time"))
         self.speed_box.currentIndexChanged.connect(lambda i: self.simc.set_speed(SPEEDS[i][1]))
         sh.addWidget(self.speed_box)
         self.time_label = QLabel("")
@@ -363,7 +389,7 @@ class MainWindow(QMainWindow):
         self._update_counts()
 
     def _update_title(self, *_):
-        name = os.path.splitext(os.path.basename(self.path))[0] if self.path else "Untitled"
+        name = os.path.splitext(os.path.basename(self.path))[0] if self.path else tr("Untitled")
         dirty = not self.undo.isClean()
         self.docname.setText(name + ("  •" if dirty else ""))
         self.setWindowTitle(f"{name}{' *' if dirty else ''} – {APP_NAME}")
@@ -385,8 +411,10 @@ class MainWindow(QMainWindow):
         self.a_props.setEnabled(len(comps) == 1)
         self.a_undo.setEnabled(self.undo.canUndo() and not running)
         self.a_redo.setEnabled(self.undo.canRedo() and not running)
-        self.a_undo.setToolTip(f"Undo {self.undo.undoText()}  (Ctrl+Z)" if self.undo.canUndo() else "Undo")
-        self.a_redo.setToolTip(f"Redo {self.undo.redoText()}  (Ctrl+Y)" if self.undo.canRedo() else "Redo")
+        self.a_undo.setToolTip(tr("Undo {what}", what=self.undo.undoText()) + "  (Ctrl+Z)" if self.undo.canUndo()
+                               else tr("Undo"))
+        self.a_redo.setToolTip(tr("Redo {what}", what=self.undo.redoText()) + "  (Ctrl+Y)" if self.undo.canRedo()
+                               else tr("Redo"))
 
     def _on_undo_index(self, _i):
         self._update_actions()
@@ -394,10 +422,10 @@ class MainWindow(QMainWindow):
 
     def _update_counts(self):
         n, w = len(self.circuit.components), len(self.circuit.wires)
-        self.count_label.setText(f"{n} part{'s' * (n != 1)} · {w} wire{'s' * (w != 1)}")
+        self.count_label.setText(trn("{n} part", "{n} parts", n) + " · " + trn("{n} wire", "{n} wires", w))
 
     def _hint(self, text):
-        self.hint.setText(text or "Pick a part from the gallery, or drag from a pin to draw a wire.")
+        self.hint.setText(text or tr("Pick a part from the gallery, or drag from a pin to draw a wire."))
 
     def _on_mode(self, mode):
         self.a_select.setChecked(mode != "wire")
@@ -407,7 +435,7 @@ class MainWindow(QMainWindow):
 
     def _pick_part(self, kind):
         if self.simc.active():
-            self.view.toast("Press Stop to go back to editing, then add the part.", "info")
+            self.view.toast(tr("Press Stop to go back to editing, then add the part."), "info")
             return
         self.scene.start_placing(kind, keep=bool(QApplication.keyboardModifiers() & Qt.ShiftModifier))
         self.view.setFocus()
@@ -416,7 +444,7 @@ class MainWindow(QMainWindow):
     def _confirm_discard(self) -> bool:
         if self.undo.isClean():
             return True
-        r = QMessageBox.question(self, APP_NAME, "Save changes to this circuit first?",
+        r = QMessageBox.question(self, APP_NAME, tr("Save changes to this circuit first?"),
                                  QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Save)
         if r == QMessageBox.Save:
             return self.save()
@@ -447,13 +475,13 @@ class MainWindow(QMainWindow):
         if not path:
             if not self._confirm_discard():
                 return
-            path, _ = QFileDialog.getOpenFileName(self, "Open circuit", self.settings.value("dir", ""), FILE_FILTER)
+            path, _ = QFileDialog.getOpenFileName(self, tr("Open circuit"), self.settings.value("dir", ""), file_filter())
             if not path:
                 return
         try:
             c = Circuit.load(path)
         except Exception as e:      # noqa: BLE001 - show any problem to the user
-            QMessageBox.warning(self, APP_NAME, f"Couldn't open {os.path.basename(path)}:\n{e}")
+            QMessageBox.warning(self, APP_NAME, tr("Couldn't open {name}:", name=os.path.basename(path)) + f"\n{e}")
             return
         self._set_circuit(c, path)
         self._add_recent(path)
@@ -464,17 +492,17 @@ class MainWindow(QMainWindow):
         try:
             self.circuit.save(self.path)
         except OSError as e:
-            QMessageBox.warning(self, APP_NAME, f"Couldn't save:\n{e}")
+            QMessageBox.warning(self, APP_NAME, tr("Couldn't save:") + f"\n{e}")
             return False
         self.undo.setClean()
         self._update_title()
         self.clear_autosave()
-        self.statusBar().showMessage(f"Saved {os.path.basename(self.path)}", 3000)
+        self.statusBar().showMessage(tr("Saved {name}", name=os.path.basename(self.path)), 3000)
         return True
 
     def save_as(self) -> bool:
         start = os.path.join(self.settings.value("dir", ""), self.docname.text().strip(" •") + FILE_EXT)
-        path, _ = QFileDialog.getSaveFileName(self, "Save circuit", start, FILE_FILTER)
+        path, _ = QFileDialog.getSaveFileName(self, tr("Save circuit"), start, file_filter())
         if not path:
             return False
         if not path.lower().endswith(FILE_EXT):
@@ -494,7 +522,7 @@ class MainWindow(QMainWindow):
         self.recent_menu.clear()
         rec = [p for p in (self.settings.value("recent") or []) if os.path.exists(p)]
         if not rec:
-            self.recent_menu.addAction("(nothing yet)").setEnabled(False)
+            self.recent_menu.addAction(tr("(nothing yet)")).setEnabled(False)
         for p in rec:
             self.recent_menu.addAction(os.path.basename(p), lambda p=p: self._open_checked(p))
 
@@ -506,7 +534,7 @@ class MainWindow(QMainWindow):
         self.examples_menu.clear()
         for p in sorted(glob.glob(os.path.join(EXAMPLES, "*" + FILE_EXT))):
             name = os.path.splitext(os.path.basename(p))[0]
-            self.examples_menu.addAction(name, lambda p=p: self._open_checked(p))
+            self.examples_menu.addAction(tr(name), lambda p=p: self._open_checked(p))
 
     # ================================================================== export
     def _title_for_export(self):
@@ -514,32 +542,33 @@ class MainWindow(QMainWindow):
 
     def export_diagram(self):
         if self.circuit.is_empty():
-            QMessageBox.information(self, APP_NAME, "There's nothing to export yet — add some parts first.")
+            QMessageBox.information(self, APP_NAME, tr("There's nothing to export yet — add some parts first."))
             return
         last = self.settings.value("export_ext", ".png")
         start = os.path.join(self.settings.value("dir", ""), self._title_for_export() + last)
-        filters = "PNG picture (*.png);;SVG drawing (*.svg);;PDF page (*.pdf)"
-        sel = {".png": "PNG picture (*.png)", ".svg": "SVG drawing (*.svg)", ".pdf": "PDF page (*.pdf)"}[last]
-        path, chosen = QFileDialog.getSaveFileName(self, "Export circuit diagram", start, filters, sel)
+        kinds = {".png": tr("PNG picture") + " (*.png)", ".svg": tr("SVG drawing") + " (*.svg)",
+                 ".pdf": tr("PDF page") + " (*.pdf)"}
+        path, chosen = QFileDialog.getSaveFileName(self, tr("Export circuit diagram"), start, ";;".join(kinds.values()),
+                                                   kinds.get(last, kinds[".png"]))
         if not path:
             return
         ext = os.path.splitext(path)[1].lower()
         if ext not in (".png", ".svg", ".pdf"):
-            ext = ".svg" if "SVG" in chosen else ".pdf" if "PDF" in chosen else ".png"
+            ext = next((e for e, k in kinds.items() if k == chosen), ".png")
             path += ext
         try:
             EX.export(self.scene, path, self._title_for_export())
         except Exception as e:      # noqa: BLE001
-            QMessageBox.warning(self, APP_NAME, f"Couldn't export:\n{e}")
+            QMessageBox.warning(self, APP_NAME, tr("Couldn't export:") + f"\n{e}")
             return
         self.settings.setValue("export_ext", ext)
-        self.statusBar().showMessage(f"Exported {os.path.basename(path)}", 4000)
+        self.statusBar().showMessage(tr("Exported {name}", name=os.path.basename(path)), 4000)
 
     def copy_picture(self):
         if self.circuit.is_empty():
             return
         QApplication.clipboard().setImage(EX.render_image(self.scene, 3.0))
-        self.statusBar().showMessage("Diagram copied — paste it into your document", 3000)
+        self.statusBar().showMessage(tr("Diagram copied — paste it into your document"), 3000)
 
     def show_bom(self):
         BomDialog(self.circuit, self).exec()
@@ -625,8 +654,8 @@ class MainWindow(QMainWindow):
         data, meta = self._autosave_paths()
         if not os.path.exists(data):
             return False
-        r = QMessageBox.question(self, APP_NAME, "Wirely didn't close properly last time.\n"
-                                 "Do you want to get back the circuit you hadn't saved?",
+        r = QMessageBox.question(self, APP_NAME, tr("Wirely didn't close properly last time.") + "\n" +
+                                 tr("Do you want to get back the circuit you hadn't saved?"),
                                  QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if r == QMessageBox.Yes:
             try:
@@ -652,7 +681,7 @@ class MainWindow(QMainWindow):
             self.simc.pause()           # F5 toggles
             return
         if self.circuit.is_empty():
-            self.view.toast("Add some parts and wire them up first — then press Play.", "info")
+            self.view.toast(tr("Add some parts and wire them up first — then press Play."), "info")
             return
         self.scene.cancel()
         self.scene.set_mode("select")
@@ -665,7 +694,7 @@ class MainWindow(QMainWindow):
             self.simc.start(self.circuit)
         except Exception as e:      # noqa: BLE001 - never crash the editor because of a bad circuit
             self.simc.stop()
-            QMessageBox.warning(self, APP_NAME, f"The simulation couldn't start:\n{e}")
+            QMessageBox.warning(self, APP_NAME, tr("The simulation couldn't start:") + f"\n{e}")
 
     def sim_pause(self):
         self.simc.pause()
@@ -683,7 +712,7 @@ class MainWindow(QMainWindow):
         elif state == "stopped":
             self.sound.stop()
         self.a_play.setEnabled(state != "running")
-        self.a_play.setToolTip("Resume  (F5)" if state == "paused" else "Run the circuit — watch it work  (F5)")
+        self._play_tip(state)
         self.a_pause.setEnabled(running)
         self.a_stop.setEnabled(state != "stopped")
         self.a_copy_readings.setEnabled(state != "stopped")
@@ -699,9 +728,16 @@ class MainWindow(QMainWindow):
             self.scene.refresh_connections()
             self._hint("")
         else:
-            self._hint("Running — click switches, drag sliders, hover over wires to read voltages." if running
-                       else "Paused — press Play to carry on, or Stop to edit.")
+            self._state_hint(state)
         self.scene.update()
+
+    def _play_tip(self, state):
+        self.a_play.setToolTip(tr("Resume") + "  (F5)" if state == "paused"
+                               else tr("Run the circuit — watch it work") + "  (F5)")
+
+    def _state_hint(self, state):
+        self._hint(tr("Running — click switches, drag sliders, hover over wires to read voltages.")
+                   if state == "running" else tr("Paused — press Play to carry on, or Stop to edit."))
 
     def _graph_toggled(self):
         self._graph_by_hand = self.a_graph.isChecked()
@@ -722,14 +758,15 @@ class MainWindow(QMainWindow):
         t = self.simc.live.t
         txt = f"t = {t:.2f} s" if t < 100 else f"t = {t:.0f} s"
         if self.simc.behind and self.simc.state == "running":
-            txt += "  · slowed"
-            self.time_label.setToolTip("This circuit is too busy to simulate in real time, so it runs slower.")
+            txt += "  · " + tr("slowed")
+            self.time_label.setToolTip(tr("This circuit is too busy to simulate in real time, so it runs slower."))
         else:
-            self.time_label.setToolTip("Simulated time since you pressed Play")
+            self.time_label.setToolTip(tr("Simulated time since you pressed Play"))
         self.time_label.setText(txt)
 
     def _on_sim_message(self, cid, text):
-        self.view.toast(text, "error" if ("popped" in text or "blew" in text or "burnt" in text) else "warn")
+        # a part that has broken is an error; a warning is something that can still be put right
+        self.view.toast(text, "error" if self.simc.is_broken(cid) else "warn")
 
     def _toggle_volts(self):
         self.scene.show_volts = self.a_volts.isChecked()
@@ -745,13 +782,13 @@ class MainWindow(QMainWindow):
     def _sound_availability(self, ok):
         if not ok:
             self.a_sound.setEnabled(False)
-            self.a_sound.setToolTip("No working sound output was found on this computer")
+            self.a_sound.setToolTip(tr("No working sound output was found on this computer"))
 
     def copy_readings(self):
         text = self.scene.readings_text()
         if text:
             QApplication.clipboard().setText(text)
-            self.statusBar().showMessage("Readings copied — paste them into a spreadsheet or document", 4000)
+            self.statusBar().showMessage(tr("Readings copied — paste them into a spreadsheet or document"), 4000)
 
     def _toggle_readings(self):
         self.scene.show_readings = self.a_readings.isChecked()
@@ -838,12 +875,53 @@ class MainWindow(QMainWindow):
         self.view.viewport().update()
 
     def about(self):
-        QMessageBox.about(self, f"About {APP_NAME}",
+        QMessageBox.about(self, tr("About Wirely"),
                           f"<h3>{APP_NAME} {__version__}</h3>"
-                          f"<p>Version {__version__}</p>"
-                          "<p>Draw a circuit, press play, watch it work.<br>"
-                          "Free and open source under the GNU GPL v3.</p>"
-                          "<p>By Richard Willmott, built with help from Claude.</p>")
+                          f"<p>{tr('Version {v}', v=__version__)}</p>"
+                          f"<p>{tr('Draw a circuit, press play, watch it work.')}<br>"
+                          f"{tr('Free and open source under the GNU GPL v3.')}</p>"
+                          f"<p>{tr('By Richard Willmott, built with help from Claude.')}</p>")
+
+    # ================================================================== language
+    def set_language(self, code):
+        """Switch every word on screen to another language, straight away, and remember the choice."""
+        code = lang.apply(code)
+        lang.remember(code)
+        self.lang_actions[code].setChecked(True)
+        self.retranslate()
+
+    def retranslate(self):
+        for a in list(self._action_src):
+            self._retr_action(a)
+        for b, name in self._menu_buttons:
+            b.setText(tr(name))
+        self.examples_menu.setTitle(tr("Open example"))
+        self.recent_menu.setTitle(tr("Open recent"))
+        self._fill_examples()
+        self.tip_label.setText(tr("Wheel: zoom · Middle-drag: pan · Double-click a part to change it"))
+        self.speed_box.setToolTip(tr("Simulation speed"))
+        i = self.speed_box.currentIndex()
+        self.speed_box.blockSignals(True)
+        for n, (name, _v) in enumerate(SPEEDS):
+            self.speed_box.setItemText(n, tr(name))
+        self.speed_box.setCurrentIndex(i)
+        self.speed_box.blockSignals(False)
+        self.scene.retranslate()
+        self.gallery.retranslate()
+        self.graph.retranslate()
+        self.view.retranslate()
+        self._update_title()
+        self._update_counts()
+        self._update_actions()
+        self._play_tip(self.simc.state)
+        self._sound_availability(self.sound.available())
+        if self.simc.state == "stopped":
+            self._hint("")
+        else:
+            self._state_hint(self.simc.state)
+        if self.simc.active():
+            self._on_sim_frame()
+        self.scene.update()
 
     def showEvent(self, e):
         super().showEvent(e)

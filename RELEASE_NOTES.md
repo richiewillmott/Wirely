@@ -1,4 +1,4 @@
-**Wirely 1.5.3: readings that make sense for capacitors, inductors and transistors.** (Includes everything from 1.5.2.)
+**Wirely 1.5.4: now in Spanish, German and Japanese.** (Includes everything from 1.5.3.)
 
 ## Use it in your browser — nothing to install
 
@@ -6,13 +6,13 @@
 
 ## Downloads (desktop app)
 
-- **Windows (64-bit):** `Wirely-Setup-1.5.3.exe` — run it; it updates an existing Wirely. If SmartScreen warns you (the installer isn't code-signed yet), click **More info → Run anyway**.
-- **Mac (Apple Silicon):** `Wirely-1.5.3-mac-arm64.dmg` — open it and drag Wirely into Applications, replacing the old one. The first time, right-click Wirely → **Open** → **Open**.
-- **Linux (x86_64):** `Wirely-1.5.3-x86_64.AppImage` — run `chmod +x Wirely-1.5.3-x86_64.AppImage`, then run it.
+- **Windows (64-bit):** `Wirely-Setup-1.5.4.exe` — run it; it updates an existing Wirely. If SmartScreen warns you (the installer isn't code-signed yet), click **More info → Run anyway**.
+- **Mac (Apple Silicon):** `Wirely-1.5.4-mac-arm64.dmg` — open it and drag Wirely into Applications, replacing the old one. The first time, right-click Wirely → **Open** → **Open**.
+- **Linux (x86_64):** `Wirely-1.5.4-x86_64.AppImage` — run `chmod +x Wirely-1.5.4-x86_64.AppImage`, then run it.
 
-## Fixed
+## New
 
-- **Capacitors no longer show power.** A capacitor charging up stores energy rather than turning it into heat, so the "mW" figure next to it was misleading. It now shows just voltage and current.
-- **Inductors** show only the small loss in the coil, not the energy going in and out of their magnetic field.
-- **MOSFETs show the current that flows through them.** The reading used to be the gate's (always about 0 A), so a MOSFET switching a motor looked like it was passing nothing. It now shows drain-to-source voltage and the drain current.
-- **NPN and PNP transistors** now show collector-to-emitter voltage and the collector current, not the base's.
+- **A Language menu** (desktop app and website): pick **English, Español, Deutsch or 日本語** and the whole program switches at once, with no restart. Your choice is remembered. On the website you can also add `?lang=ja` (or `de`, `es`) to the address.
+- **Everything is translated:** menus, tips, the parts gallery, property dialogs, the graph, the shortcut list, the failure messages, and all 35 example circuits with their notes.
+- **Circuits you save don't depend on the language**, so a circuit made in one language opens in any other.
+- The translations are new: if anything reads oddly, please open an issue on GitHub.

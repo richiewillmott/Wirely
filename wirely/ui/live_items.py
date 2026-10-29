@@ -7,6 +7,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsItem
 
+from ..i18n import tr
 from ..model.units import fmt
 from . import theme
 
@@ -38,7 +39,7 @@ class Scale:
 
     def text(self, v):
         if self.kind == "ldr":
-            word = "dark" if v < 5 else "dim" if v < 100 else "room" if v < 1000 else "bright"
+            word = tr("dark" if v < 5 else "dim" if v < 100 else "room" if v < 1000 else "bright")
             return f"{fmt(v, 'lux')} · {word}"
         if self.kind == "thermistor":
             return f"{v:g} °C"
@@ -58,7 +59,7 @@ class SliderItem(QGraphicsItem):
         self.setZValue(15)
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Drag to change it while the circuit runs (or use the mouse wheel)")
+        self.setToolTip(tr("Drag to change it while the circuit runs (or use the mouse wheel)"))
         self._drag = False
         self.place()
 

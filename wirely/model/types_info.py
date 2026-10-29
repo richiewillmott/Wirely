@@ -1,6 +1,8 @@
 """What each part type (model number) is good for: shown under the Type box when you double-click a part,
 so you can tell, say, why you'd pick an AO3400 over a 2N7002. Figures are typical datasheet values."""
 
+from ..i18n import tr
+
 TYPE_INFO = {
     # ---------------------------------------------------------------- diodes
     "1N4001": "General-purpose rectifier: 1 A, 50 V. For power supplies and reverse-polarity protection.",
@@ -109,4 +111,5 @@ TYPE_INFO = {
 
 
 def describe(model: str) -> str:
-    return TYPE_INFO.get(str(model), "")
+    text = TYPE_INFO.get(str(model), "")
+    return tr(text) if text else ""

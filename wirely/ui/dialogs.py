@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFil
                                QHeaderView, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
+from ..i18n import tr
 from ..model import parts as P
 from ..model.circuit import Circuit, Component
 from ..model.types_info import describe
@@ -29,7 +30,7 @@ class PropertiesDialog(QDialog):
         super().__init__(parent)
         self.comp, self.circuit = comp, circuit
         part = comp.part
-        self.setWindowTitle(f"{comp.ref} – {part.name}")
+        self.setWindowTitle(f"{comp.ref} – {part.tr_name}")
         self.setMinimumWidth(380)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(18, 16, 18, 14)
@@ -40,9 +41,9 @@ class PropertiesDialog(QDialog):
         pic.setPixmap(S.pixmap(part.key, 76, 50, QColor(theme.INK), QColor(theme.PANEL), comp.props))
         top.addWidget(pic)
         tv = QVBoxLayout()
-        title = QLabel(part.name)
+        title = QLabel(part.tr_name)
         title.setObjectName("dialogTitle")
-        hint = QLabel(part.description)
+        hint = QLabel(part.tr_description)
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         tv.addWidget(title)
@@ -55,8 +56,8 @@ class PropertiesDialog(QDialog):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(8)
         self.ref = QLineEdit(comp.ref)
-        self.ref.setToolTip("The label on the diagram, e.g. R1")
-        form.addRow("Label", self.ref)
+        self.ref.setToolTip(tr("The label on the diagram, e.g. R1"))
+        form.addRow(tr("Label"), self.ref)
         self.fields = {}
         self.unit_boxes = {}
         for p in part.props:
@@ -70,14 +71,15 @@ class PropertiesDialog(QDialog):
                 w.setTabChangesFocus(True)
             elif p.kind == "choice":
                 w = QComboBox()
-                for ch in p.choices:
+                for ch in p.choices:         # shown in the chosen language; the English is what gets saved
                     if p.key == "colour" and ch in S.LED_RGB:
                         pm = QPixmap(14, 14)
                         pm.fill(QColor(S.LED_RGB[ch]))
-                        w.addItem(QIcon(pm), ch)
+                        w.addItem(QIcon(pm), P.choice_text(ch), ch)
                     else:
-                        w.addItem(ch)
-                w.setCurrentText(str(v))
+                        w.addItem(P.choice_text(ch), ch)
+                if w.findData(str(v)) >= 0:
+                    w.setCurrentIndex(w.findData(str(v)))
                 if p.key == "model":
                     for ix, ch in enumerate(p.choices):
                         if describe(ch):
@@ -87,12 +89,12 @@ class PropertiesDialog(QDialog):
                 num, choice = split(float(v), p.unit)
                 w = QLineEdit(num)
                 dnum, dchoice = split(float(p.default), p.unit)
-                w.setPlaceholderText(f"e.g. {dnum}")
-                w.setToolTip(p.help or "Type the number and pick its size — or type it all, like 4k7 or 100n")
+                w.setPlaceholderText(tr("e.g. {value}", value=dnum))
+                w.setToolTip(p.tr_help or tr("Type the number and pick its size — or type it all, like 4k7 or 100n"))
                 box = QComboBox()
                 box.addItems(unit_choices(p.unit))
                 box.setCurrentText(choice)
-                box.setToolTip("Ω, kΩ (thousand), MΩ (million) … or pF, nF, µF …")
+                box.setToolTip(tr("Ω, kΩ (thousand), MΩ (million) … or pF, nF, µF …"))
                 w.textChanged.connect(self._validate)
                 box.currentTextChanged.connect(self._validate)
                 w.editingFinished.connect(lambda p=p, w=w, box=box: self._tidy(p, w, box))
@@ -104,23 +106,23 @@ class PropertiesDialog(QDialog):
                 rl.addWidget(w, 1)
                 rl.addWidget(box)
                 self.fields[p.key] = (p, w)
-                form.addRow(p.label, row)
+                form.addRow(p.tr_label, row)
                 continue
             else:
                 w = QLineEdit(fmt(v, p.unit))
-                w.setPlaceholderText(f"e.g. {fmt(p.default, p.unit)}")
-                tip = p.help or "Type values like 10k, 4k7, 2M2, 100n, 4.7µ"
+                w.setPlaceholderText(tr("e.g. {value}", value=fmt(p.default, p.unit)))
+                tip = p.tr_help or tr("Type values like 10k, 4k7, 2M2, 100n, 4.7µ")
                 w.setToolTip(tip)
                 w.textChanged.connect(self._validate)
             self.fields[p.key] = (p, w)
-            form.addRow(p.label, w)
+            form.addRow(p.tr_label, w)
             if p.kind == "choice" and p.key == "model":
                 # what this type is good for — so you can tell why you'd pick one over another
-                info = QLabel(describe(w.currentText()))
+                info = QLabel(describe(w.currentData()))
                 info.setObjectName("hint")
                 info.setWordWrap(True)
                 info.setMinimumWidth(300)
-                w.currentTextChanged.connect(lambda t, lab=info: lab.setText(describe(t)))
+                w.currentIndexChanged.connect(lambda i, lab=info, box=w: lab.setText(describe(box.itemData(i))))
                 self.type_info = info
                 form.addRow("", info)
         lay.addLayout(form)
@@ -131,9 +133,9 @@ class PropertiesDialog(QDialog):
 
         btns = QHBoxLayout()
         btns.addStretch(1)
-        cancel = QPushButton("Cancel")
+        cancel = QPushButton(tr("Cancel"))
         cancel.clicked.connect(self.reject)
-        self.ok = QPushButton("OK")
+        self.ok = QPushButton(tr("OK"))
         self.ok.setObjectName("primary")
         self.ok.setDefault(True)
         self.ok.clicked.connect(self._accept)
@@ -161,7 +163,7 @@ class PropertiesDialog(QDialog):
             elif p.kind == "text":
                 out[key] = w.toPlainText().strip() or " "
             elif p.kind == "choice":
-                out[key] = w.currentText()
+                out[key] = w.currentData()
             else:
                 try:
                     if key in self.unit_boxes:
@@ -169,9 +171,9 @@ class PropertiesDialog(QDialog):
                     else:
                         v = parse(w.text(), p.unit)
                     if p.min is not None and v < p.min:
-                        raise ValueError(f"{p.label} must be at least {fmt(p.min, p.unit)}")
+                        raise ValueError(tr("{label} must be at least {value}", label=p.tr_label, value=fmt(p.min, p.unit)))
                     if p.max is not None and v > p.max:
-                        raise ValueError(f"{p.label} can be at most {fmt(p.max, p.unit)}")
+                        raise ValueError(tr("{label} can be at most {value}", label=p.tr_label, value=fmt(p.max, p.unit)))
                     out[key] = v
                     w.setProperty("invalid", "false")
                 except ValueError as e:
@@ -181,9 +183,9 @@ class PropertiesDialog(QDialog):
                 w.style().polish(w)
         ref = self.ref.text().strip()
         if not ref:
-            problems.append("The label can't be empty")
+            problems.append(tr("The label can't be empty"))
         elif any(c.ref == ref and c.id != self.comp.id for c in self.circuit.components.values()):
-            problems.append(f"Another part is already called {ref}")
+            problems.append(tr("Another part is already called {ref}", ref=ref))
         return out, ref, problems
 
     def _validate(self):
@@ -203,15 +205,15 @@ class PropertiesDialog(QDialog):
 class BomDialog(QDialog):
     def __init__(self, circuit: Circuit, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Bill of materials")
+        self.setWindowTitle(tr("Bill of materials"))
         self.resize(560, 420)
         self.rows = circuit.bill_of_materials()
         lay = QVBoxLayout(self)
-        title = QLabel(f"Parts list — {sum(r['qty'] for r in self.rows)} parts")
+        title = QLabel(tr("Parts list — {n} parts", n=sum(r["qty"] for r in self.rows)))
         title.setObjectName("dialogTitle")
         lay.addWidget(title)
         t = QTableWidget(len(self.rows), 3)
-        t.setHorizontalHeaderLabels(["Qty", "Part", "Labels"])
+        t.setHorizontalHeaderLabels([tr("Qty"), tr("Part"), tr("Labels")])
         t.verticalHeader().hide()
         t.setEditTriggers(QTableWidget.NoEditTriggers)
         t.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -225,11 +227,11 @@ class BomDialog(QDialog):
             t.setItem(i, 2, QTableWidgetItem(", ".join(r["refs"])))
         lay.addWidget(t, 1)
         btns = QHBoxLayout()
-        copy = QPushButton("Copy")
+        copy = QPushButton(tr("Copy"))
         copy.clicked.connect(self._copy)
-        save = QPushButton("Save as CSV…")
+        save = QPushButton(tr("Save as CSV…"))
         save.clicked.connect(self._save)
-        close = QPushButton("Close")
+        close = QPushButton(tr("Close"))
         close.setObjectName("primary")
         close.clicked.connect(self.accept)
         btns.addWidget(copy)
@@ -239,17 +241,17 @@ class BomDialog(QDialog):
         lay.addLayout(btns)
 
     def _copy(self):
-        text = "Qty\tPart\tLabels\n" + "\n".join(f"{r['qty']}\t{r['description']}\t{', '.join(r['refs'])}"
+        text = f"{tr('Qty')}\t{tr('Part')}\t{tr('Labels')}\n" + "\n".join(f"{r['qty']}\t{r['description']}\t{', '.join(r['refs'])}"
                                                    for r in self.rows)
         QApplication.clipboard().setText(text)
 
     def _save(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save parts list", "parts list.csv", "CSV files (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, tr("Save parts list"), "parts list.csv", tr("CSV files") + " (*.csv)")
         if not path:
             return
         with open(path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
-            w.writerow(["Qty", "Part", "Labels"])
+            w.writerow([tr("Qty"), tr("Part"), tr("Labels")])
             for r in self.rows:
                 w.writerow([r["qty"], r["description"], " ".join(r["refs"])])
 
@@ -283,24 +285,24 @@ SHORTCUTS = [
 class ShortcutsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("How to use Wirely")
+        self.setWindowTitle(tr("How to use Wirely"))
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 16, 20, 14)
-        title = QLabel("Mouse and keyboard")
+        title = QLabel(tr("Mouse and keyboard"))
         title.setObjectName("dialogTitle")
         lay.addWidget(title)
         form = QFormLayout()
         form.setHorizontalSpacing(18)
         form.setVerticalSpacing(7)
         for a, b in SHORTCUTS:
-            l = QLabel(f"<b>{a}</b>")
-            r = QLabel(b)
+            l = QLabel(f"<b>{tr(a)}</b>")
+            r = QLabel(tr(b))
             r.setWordWrap(True)
             form.addRow(l, r)
         w = QWidget()
         w.setLayout(form)
         lay.addWidget(w)
-        ok = QPushButton("Close")
+        ok = QPushButton(tr("Close"))
         ok.setObjectName("primary")
         ok.clicked.connect(self.accept)
         h = QHBoxLayout()

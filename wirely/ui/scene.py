@@ -12,6 +12,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QGraphicsScene
 
+from ..i18n import tr
 from ..model import parts as P
 from ..model.circuit import Circuit, Component, Wire, drag_end, move_segment, route, snap, tidy
 from ..model.circuit import on_segment as _on_seg
@@ -99,6 +100,12 @@ class CircuitScene(QGraphicsScene):
         self.tag_offsets = {}
         self.circuit = circuit
         self.rebuild()
+
+    def retranslate(self):
+        """A language change: labels show translated choices and notes are as big as their text, so redo them."""
+        for it in self.comp_items.values():
+            it.sync()
+        self.update()
 
     def refresh_connections(self):
         self._junctions = self.circuit.junctions()
@@ -311,22 +318,24 @@ class CircuitScene(QGraphicsScene):
             if v is None:
                 return None
             amps, arrow = self._wire_current(item.wire, pos)
-            cur = f"{fmt(amps, 'A')} {arrow}" if amps >= 1e-6 else "no current"
-            return "Wire", [f"Voltage: {fmt(v if abs(v) >= 1e-3 else 0.0, 'V')}", f"Current: {cur}"]
+            cur = f"{fmt(amps, 'A')} {arrow}" if amps >= 1e-6 else tr("no current")
+            return tr("Wire"), [tr("Voltage: {v}", v=fmt(v if abs(v) >= 1e-3 else 0.0, "V")),
+                                tr("Current: {i}", i=cur)]
         if isinstance(item, ComponentItem):
             info = live.parts.get(item.comp.id)
             if not info or "v" not in info:
                 return None
-            lines = [f"Voltage across: {fmt(abs(info['v']), 'V')}", f"Current: {fmt(abs(info['i']), 'A')}"]
+            lines = [tr("Voltage across: {v}", v=fmt(abs(info["v"]), "V")),
+                     tr("Current: {i}", i=fmt(abs(info["i"]), "A"))]
             if self.power_only(item.comp):
-                lines = [f"Power: {fmt(abs(info.get('p', 0.0)), 'W')}"]
+                lines = [tr("Power: {p}", p=fmt(abs(info.get("p", 0.0)), "W"))]
             elif abs(info.get("p", 0)) > 1e-6 and item.comp.kind not in ("cell", "battery", "dc_supply", "ac_supply",
                                                                           "rail_pos", "signal_gen"):
-                lines.append(f"Power: {fmt(abs(info['p']), 'W')}")
+                lines.append(tr("Power: {p}", p=fmt(abs(info["p"]), "W")))
             if "rpm" in info:
-                lines.append(f"Speed: {abs(info['rpm']):.0f} rpm")
+                lines.append(tr("Speed: {rpm:.0f} rpm", rpm=abs(info["rpm"])))
             if info.get("blown"):
-                lines.append("Broken — press Stop to mend it")
+                lines.append(tr("Broken — press Stop to mend it"))
             return item.comp.ref, lines
 
     def _probe_text(self, pos):
@@ -426,7 +435,7 @@ class CircuitScene(QGraphicsScene):
             self.hover_info = None
             for v in self.views():
                 v.viewport().setCursor(Qt.OpenHandCursor)
-            self.status.emit("Drag the reading to move it out of the way")
+            self.status.emit(tr("Drag the reading to move it out of the way"))
             return
         item = self.item_at(pos)
         clickable = isinstance(item, ComponentItem) and item.comp.kind in INTERACTIVE
@@ -437,15 +446,16 @@ class CircuitScene(QGraphicsScene):
             self.update()
         text = self._probe_text(pos)
         if clickable:
-            what = {"reed_switch": "click to move the magnet", "hall": "click to move the magnet",
-                    "tilt_switch": "click to tilt it", "rotary": "click to turn it to the next position",
-                    "keypad": "hold down a key to press it"}.get(
-                item.comp.kind, "hold down to press" if item.comp.kind.startswith("push") else "click to switch")
-            text = f"{text}   ·   {what}" if text else what.capitalize()
+            is_push = item.comp.kind.startswith("push")
+            what = tr({"reed_switch": "click to move the magnet", "hall": "click to move the magnet",
+                       "tilt_switch": "click to tilt it", "rotary": "click to turn it to the next position",
+                       "keypad": "hold down a key to press it"}.get(
+                item.comp.kind, "hold down to press" if is_push else "click to switch"))
+            text = f"{text}   ·   {what}" if text else what[:1].upper() + what[1:]
         elif isinstance(item, (ComponentItem, WireItem)) and text:
             key = item.comp.id if isinstance(item, ComponentItem) else item.wire.id
-            text += "   ·   click to " + ("unpin its reading" if key in self.pinned else "pin its reading")
-        self.status.emit(text or "Running — click switches, drag sliders, hover over wires to read voltages.")
+            text += "   ·   " + tr("click to unpin its reading" if key in self.pinned else "click to pin its reading")
+        self.status.emit(text or tr("Running — click switches, drag sliders, hover over wires to read voltages."))
 
     # ================================================================== modes
     def set_mode(self, mode: str):
@@ -453,7 +463,7 @@ class CircuitScene(QGraphicsScene):
         self.mode = mode
         self.modeChanged.emit(mode)
         if mode == "wire":
-            self.status.emit("Wire: press on a pin or a wire and drag to another pin. Click to add corners, Esc to stop.")
+            self.status.emit(tr("Wire: press on a pin or a wire and drag to another pin. Click to add corners, Esc to stop."))
         else:
             self.status.emit("")
         for v in self.views():
@@ -470,8 +480,8 @@ class CircuitScene(QGraphicsScene):
         self._ghost.hide()
         self.mode = "place"
         self.modeChanged.emit("place")
-        self.status.emit(f"Click on the sheet to place the {P.get(kind).name.lower()}. "
-                         "R rotates, F flips, Esc cancels.")
+        self.status.emit(tr("Click on the sheet to place the {name}. R rotates, F flips, Esc cancels.",
+                            name=P.get(kind).tr_name_lower))
 
     def _move_ghost(self, pos: QPointF):
         if self._ghost:
@@ -486,7 +496,7 @@ class CircuitScene(QGraphicsScene):
         self.clearSelection()
         self.comp_items[c.id].setSelected(True)
         self.refresh_connections()
-        self.edited.emit(f"Add {c.ref}")
+        self.edited.emit(tr("Add {ref}", ref=c.ref))
         if self._place_keep:
             self._ghost.comp.ref = self.circuit.next_ref(P.get(g.kind).prefix)
             self._ghost.sync()
@@ -576,7 +586,7 @@ class CircuitScene(QGraphicsScene):
         moves = {c.id: (c.x, c.y, (c.rot + (1 if clockwise else 3)) % 4, c.flip) for c in comps}
         self._apply_moves(moves, oc, ow, set())
         self.refresh_connections()
-        self.edited.emit("Rotate")
+        self.edited.emit(tr("Rotate"))
 
     def flip_selected(self):
         if self._ghost is not None:
@@ -590,7 +600,7 @@ class CircuitScene(QGraphicsScene):
         moves = {c.id: (c.x, c.y, c.rot, not c.flip) for c in comps}
         self._apply_moves(moves, oc, ow, set())
         self.refresh_connections()
-        self.edited.emit("Flip")
+        self.edited.emit(tr("Flip"))
 
     def delete_selected(self):
         comps, wires = self.selected_ids()
@@ -603,7 +613,7 @@ class CircuitScene(QGraphicsScene):
             self.removeItem(self.wire_items.pop(wid))
             self.circuit.remove(wid)
         self.refresh_connections()
-        self.edited.emit("Delete")
+        self.edited.emit(tr("Delete"))
 
     def select_all(self):
         for it in list(self.comp_items.values()) + list(self.wire_items.values()):
@@ -641,7 +651,7 @@ class CircuitScene(QGraphicsScene):
             return False
         self.select_ids(new_ids)
         self.refresh_connections()
-        self.edited.emit("Paste")
+        self.edited.emit(tr("Paste"))
         return True
 
     def update_component(self, cid, props: dict, ref: str | None = None):
@@ -650,7 +660,7 @@ class CircuitScene(QGraphicsScene):
         if ref:
             c.ref = ref
         self.sync_component(cid)
-        self.edited.emit(f"Edit {c.ref}")
+        self.edited.emit(tr("Edit {ref}", ref=c.ref))
 
     # ================================================================== mouse
     def mousePressEvent(self, e):
@@ -781,7 +791,7 @@ class CircuitScene(QGraphicsScene):
             for v in self.views():
                 v.viewport().setCursor(Qt.CrossCursor if (hp or self.mode == "wire") else Qt.ArrowCursor)
             if hp:
-                self.status.emit("Drag from this pin to draw a wire.")
+                self.status.emit(tr("Drag from this pin to draw a wire."))
             self.update()
         super().mouseMoveEvent(e)
 
@@ -799,8 +809,8 @@ class CircuitScene(QGraphicsScene):
                     self._finish_wire(e.scenePos())
                 else:
                     w["click"] = True       # it was a click: carry on routing with clicks
-                    self.status.emit("Click to add corners; click a pin or wire to finish. "
-                                     "Double-click to stop here, Esc cancels, Backspace undoes a corner.")
+                    self.status.emit(tr("Click to add corners; click a pin or wire to finish. "
+                                        "Double-click to stop here, Esc cancels, Backspace undoes a corner."))
             return
         d, self._drag = self._drag, None
         if d is None:
@@ -816,7 +826,7 @@ class CircuitScene(QGraphicsScene):
                 else:
                     self.wire_items[w.id].sync()
             self.refresh_connections()
-            self.edited.emit({"move": "Move", "segment": "Move wire", "wire_end": "Move wire end"}[d["kind"]])
+            self.edited.emit(tr({"move": "Move", "segment": "Move wire", "wire_end": "Move wire end"}[d["kind"]]))
 
     def mouseDoubleClickEvent(self, e):
         if e.button() != Qt.LeftButton:
@@ -937,9 +947,9 @@ class CircuitScene(QGraphicsScene):
         if wire:
             self._add_wire_item(wire)
             self.refresh_connections()
-            self.edited.emit("Add wire")
+            self.edited.emit(tr("Add wire"))
         if self.mode == "wire":
-            self.status.emit("Wire added. Draw another, or press Esc.")
+            self.status.emit(tr("Wire added. Draw another, or press Esc."))
 
     # ================================================================== drag and drop from the gallery
     def dragEnterEvent(self, e):
@@ -1093,14 +1103,15 @@ class CircuitScene(QGraphicsScene):
             if not info or "v" not in info:
                 continue
             power = num(info.get("p", 0.0), 1e-6) if comp.kind not in self.SOURCES else ""
-            name = comp.part.short or comp.part.name
+            name = comp.part.tr_tile_name
             if self.power_only(comp):
                 rows.append("\t".join((comp.ref, name, "", "", power)))
             else:
                 rows.append("\t".join((comp.ref, name, num(info["v"], 1e-3), num(info["i"], 1e-6), power)))
         t = getattr(self.sim, "sim", None)
-        when = f"Readings at {t.t:.3g} s" if t is not None else "Readings"
-        return "\n".join([when, "Part\tWhat\tVoltage (V)\tCurrent (A)\tPower (W)"] + rows) + "\n"
+        when = tr("Readings at {t:.3g} s", t=t.t) if t is not None else tr("Readings")
+        head = "\t".join((tr("Part"), tr("What"), tr("Voltage (V)"), tr("Current (A)"), tr("Power (W)")))
+        return "\n".join([when, head] + rows) + "\n"
 
     def _draw_readings(self, p, live):
         from ..model.units import fmt

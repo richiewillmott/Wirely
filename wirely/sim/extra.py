@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 
+from ..i18n import tr
 from .chips import Digital, Relay, SEGMENTS, frac_cross, numeric_stamp, softplus
 from .devices import Diode, Device, R_OFF, R_ON, RsDiode as _RsDiode, spike_message, v
 
@@ -147,8 +148,9 @@ class Bridge(Device):
             self.power += d.power
             warn = warn or d.warn
             if d.event:
-                self.event = (f"{self.comp.ref} burnt out — one of its diodes carried more than its "
-                              f"{d.imax:g} A rating.")
+                self.event = tr("{ref} burnt out — one of its diodes carried more than its "
+                                "{imax:g} A rating.",
+                                ref=self.comp.ref, imax=d.imax)
                 d.event = None
         self.i_pins = pins
         self.warn = warn
@@ -225,8 +227,9 @@ class SCR(Device):
             self.gate.event = None
             self.blown = self._told = True
             self.on = False
-            self.event = (f"{self.comp.ref} burnt out — {abs(i_g):.1f} A into its gate. The gate only needs a few "
-                          "milliamps: put a resistor (1 kΩ or so) in series with it.")
+            self.event = tr("{ref} burnt out — {i_g:.1f} A into its gate. The gate only needs a few "
+                            "milliamps: put a resistor (1 kΩ or so) in series with it.",
+                            ref=self.comp.ref, i_g=abs(i_g))
             self.i_pins = [0.0, -i_g, i_g]
             return
         if self.on and not self.blown:
@@ -255,8 +258,9 @@ class SCR(Device):
             self.on = False
             if not getattr(self, "_told", False):
                 self._told = True
-                self.event = (f"{self.comp.ref} burnt out — {abs(i_a):.1f} A is more than a {model} can carry "
-                              f"({self.imax:g} A).")
+                self.event = tr("{ref} burnt out — {i_a:.1f} A is more than a {model} can carry "
+                                "({imax:g} A).",
+                                ref=self.comp.ref, i_a=abs(i_a), model=model, imax=self.imax)
             return
         if abs(self.vd) > 1.2 * self.vdrm:
             self.blown = True
@@ -267,8 +271,9 @@ class SCR(Device):
         if self._overload(bad, ctx.h, 0.1, abs(i_a) > 5 * self.imax):
             self.blown = self._told = True
             self.on = False
-            self.event = (f"{self.comp.ref} burnt out — {abs(i_a):.1f} A is more than a {model} can carry "
-                          f"({self.imax:g} A).")
+            self.event = tr("{ref} burnt out — {i_a:.1f} A is more than a {model} can carry "
+                            "({imax:g} A).",
+                            ref=self.comp.ref, i_a=abs(i_a), model=model, imax=self.imax)
 
     def live_extra(self):
         return {"_on": bool(self.on and not self.blown)}
@@ -404,8 +409,9 @@ class Regulator(Device):
         self.power = self.i_pins[0] * V[0] + self.i_pins[1] * V[1] + self.i_pins[2] * V[2]
         if self.vd > 1.1 * self.vin_max:
             self.blown = True
-            self.event = (f"{self.comp.ref} was destroyed — {self.vd:.0f} V on its input is more than a {self.model} "
-                          f"can take ({self.vin_max:g} V).")
+            self.event = tr("{ref} was destroyed — {vd:.0f} V on its input is more than a {model} "
+                            "can take ({vin_max:g} V).",
+                            ref=self.comp.ref, vd=self.vd, model=self.model, vin_max=self.vin_max)
             return
         if ctx.dc:
             self.heat = 0.0
@@ -416,10 +422,14 @@ class Regulator(Device):
             self.hot = True
             if not getattr(self, "_told", False):
                 self._told = True
-                sink = "" if self.prop("heatsink") else " Put it on a heatsink, or"
-                self.event = (f"{self.comp.ref} got too hot and switched itself off — it's turning "
-                              f"{self.power:.1f} W into heat (input − output voltage × current).{sink} use a lower "
-                              "input voltage or a smaller load.")
+                if self.prop("heatsink"):
+                    self.event = tr("{ref} got too hot and switched itself off — it's turning {power:.1f} W into "
+                                    "heat (input − output voltage × current). Use a lower input voltage or a "
+                                    "smaller load.", ref=self.comp.ref, power=self.power)
+                else:
+                    self.event = tr("{ref} got too hot and switched itself off — it's turning {power:.1f} W into "
+                                    "heat (input − output voltage × current). Put it on a heatsink, or use a "
+                                    "lower input voltage or a smaller load.", ref=self.comp.ref, power=self.power)
         elif self.hot and self.heat < 0.7 * self.pmax:
             self.hot = False
         if self.hot != was:
@@ -499,12 +509,14 @@ class Transformer(Device):
         self.warn = "hot" if self.heat > self.rating else None
         if abs(im) > 2.0 and not getattr(self, "_dc_told", False):
             self._dc_told = True
-            self.event = (f"{self.comp.ref}: a transformer only works with AC — on DC its primary is just a coil of "
-                          "wire, so it lets a big current through and passes nothing to the secondary.")
+            self.event = tr("{ref}: a transformer only works with AC — on DC its primary is just a coil of "
+                            "wire, so it lets a big current through and passes nothing to the secondary.",
+                            ref=self.comp.ref)
         if not self.blown and self._overload(self.heat > 2 * self.rating, h, 1.0):
             self.blown = True
-            self.event = (f"{self.comp.ref} overheated — {self.heat:.1f} W is far more than its "
-                          f"{self.rating:g} W rating.")
+            self.event = tr("{ref} overheated — {heat:.1f} W is far more than its "
+                            "{rating:g} W rating.",
+                            ref=self.comp.ref, heat=self.heat, rating=self.rating)
 
     def after_dc(self):
         pass
@@ -572,9 +584,12 @@ class Hall(Device):
         self.warn = "over" if iout > self.IMAX else None
         if supply > 28 or self._overload(iout > self.IMAX, ctx.h, 0.1, iout > 4 * self.IMAX):
             self.blown = True
-            self.event = (f"{self.comp.ref} was destroyed — " + (f"{supply:.0f} V is more than its 24 V limit." if
-                          supply > 28 else f"{iout * 1000:.0f} mA through its output is too much (max 25 mA): "
-                          "use a bigger pull-up resistor."))
+            if supply > 28:
+                self.event = tr("{ref} was destroyed — {supply:.0f} V is more than its 24 V limit.",
+                                ref=self.comp.ref, supply=supply)
+            else:
+                self.event = tr("{ref} was destroyed — {iout:.0f} mA through its output is too much (max 25 mA): "
+                                "use a bigger pull-up resistor.", ref=self.comp.ref, iout=iout * 1000)
 
 
 class Solenoid(Device):
@@ -647,8 +662,9 @@ class Solenoid(Device):
         if self._overload(abs(vd) > 1.5 * self.V, h, 2.0, abs(vd) > 4 * self.V):
             self.blown = True
             self.on = False
-            self.event = (f"{self.comp.ref} burnt out — {abs(vd):.0f} V is too much for a {self.V:g} V solenoid: "
-                          "its coil overheated.")
+            self.event = tr("{ref} burnt out — {vd:.0f} V is too much for a {V:g} V solenoid: "
+                            "its coil overheated.",
+                            ref=self.comp.ref, vd=abs(vd), V=self.V)
 
     def after_dc(self):
         pass
@@ -713,8 +729,9 @@ class Comparator(Device):
         self.warn = "over" if bad else None
         if self._overload(bad, ctx.h, 0.2, abs(i) > 6 * self.isc):
             self.blown = True
-            self.event = (f"{self.comp.ref} burnt out — its output had to sink {abs(i) * 1000:.0f} mA (a "
-                          f"{self.prop('model')} can take {self.isc * 1000:.0f} mA). Use a bigger pull-up resistor.")
+            self.event = tr("{ref} burnt out — its output had to sink {i:.0f} mA (a "
+                            "{model} can take {isc:.0f} mA). Use a bigger pull-up resistor.",
+                            ref=self.comp.ref, i=abs(i) * 1000, model=self.prop('model'), isc=self.isc * 1000)
 
 
 # ============================================================================================ counters
@@ -933,21 +950,24 @@ class L293D(Device):
             self.hot = True
             if not getattr(self, "_told_hot", False):
                 self._told_hot = True
-                self.event = (f"{self.comp.ref} got too hot and switched its outputs off — it's turning "
-                              f"{self.power:.1f} W into heat. An L293D can drive about 0.6 A per output; use a "
-                              "smaller motor or a bigger driver.")
+                self.event = tr("{ref} got too hot and switched its outputs off — it's turning "
+                                "{power:.1f} W into heat. An L293D can drive about 0.6 A per output; use a "
+                                "smaller motor or a bigger driver.",
+                                ref=self.comp.ref, power=self.power)
         elif self.hot and self.heat < 0.7 * self.PMAX:
             self.hot = False
         vcc2 = v(x, n[11]) - vg
         if not self.blown and not ctx.dc and (vcc2 > self.VMAX * 1.1 or vcc1 > 7.5 + 0.5):
             self.blown = True
             what, lim = ("VCC2", self.VMAX) if vcc2 > self.VMAX * 1.1 else ("VCC1", 7.0)
-            self.event = (f"{self.comp.ref} was destroyed — {max(vcc1, vcc2):.0f} V on {what} is more than its "
-                          f"{lim:g} V limit.")
+            self.event = tr("{ref} was destroyed — {volts:.0f} V on {what} is more than its "
+                            "{lim:g} V limit.",
+                            ref=self.comp.ref, volts=max(vcc1, vcc2), what=what, lim=lim)
         if not self.blown and self._overload(worst > 2 * self.IMAX, ctx.h, 0.1, worst > 5 * self.IMAX):
             self.blown = True
-            self.event = (f"{self.comp.ref} burnt out — an output carried {worst:.1f} A, more than the "
-                          f"{self.IMAX:g} A an L293D can take. (Is an output shorted, or a motor stalled?)")
+            self.event = tr("{ref} burnt out — an output carried {worst:.1f} A, more than the "
+                            "{IMAX:g} A an L293D can take. (Is an output shorted, or a motor stalled?)",
+                            ref=self.comp.ref, worst=worst, IMAX=self.IMAX)
         self.warn = "hot" if (self.hot or self.heat > 0.8 * self.PMAX or worst > 0.6) else None
         drive = self._compute(vcc1 >= 4.0)
         if drive != self.drive:
@@ -1093,8 +1113,9 @@ class Stepper(Device):
         self.warn = "hot" if self.current > 1.5 * irated else None
         if self._overload(self.current > 2.5 * irated, h, 1.0):
             self.blown = True
-            self.event = (f"{self.comp.ref} burnt out — {self.current:.1f} A is far more than its coils can take "
-                          f"({irated:.2f} A at {self.V:g} V).")
+            self.event = tr("{ref} burnt out — {current:.1f} A is far more than its coils can take "
+                            "({irated:.2f} A at {V:g} V).",
+                            ref=self.comp.ref, current=self.current, irated=irated, V=self.V)
 
     def after_dc(self):
         pass

@@ -10,6 +10,8 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QGuiApplication, QLinearGradie
                            QPixmap, QRadialGradient)
 from PySide6.QtWidgets import QApplication, QWidget
 
+from ..i18n import tr
+
 W, H = 720, 400
 BAR_H = 40
 TEAL = QColor(16, 163, 163)
@@ -21,7 +23,7 @@ ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
 def _version():
     try:
         from .. import __revision__, __version__
-        return f"Version {__version__}" if __revision__ == __version__ else f"{__version__}  ·  {__revision__}"
+        return tr("Version {v}", v=__version__) if __revision__ == __version__ else f"{__version__}  ·  {__revision__}"
     except Exception:       # noqa: BLE001
         return ""
 
@@ -33,7 +35,7 @@ class Splash(QWidget):
         super().__init__(None, Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setFixedSize(W, H)
-        self.text = "Starting…"
+        self.text = tr("Starting…")
         self.frac = 0.0
         self.t0 = time.monotonic()
         self._bg = self._make_background()
@@ -50,7 +52,7 @@ class Splash(QWidget):
         QApplication.processEvents()
 
     def finish(self, window):
-        self.step("Ready", 1.0)
+        self.step(tr("Ready"), 1.0)
         end = time.monotonic() + max(0.0, self.MIN_SECONDS - (time.monotonic() - self.t0))
         while time.monotonic() < end:
             QApplication.processEvents()
@@ -99,7 +101,7 @@ class Splash(QWidget):
         p.setFont(f2)
         p.setPen(QColor(170, 186, 198))
         p.drawText(QRectF(180, 206, 460, 24), Qt.AlignLeft | Qt.AlignVCenter,
-                   "Draw a circuit, press play, watch it work")
+                   tr("Draw a circuit, press play, watch it work"))
         v = _version()
         if v:
             f3 = QFont("Segoe UI")
@@ -187,7 +189,7 @@ def show_splash():
     try:
         s = Splash()
         s.show()
-        s.step("Starting…", 0.05)
+        s.step(tr("Starting…"), 0.05)
         return s
     except Exception:       # noqa: BLE001
         return None

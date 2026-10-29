@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 
+from ..i18n import tr
 from .devices import (BJT, GMIN, LED_N, LED_RS, R_OFF, R_ON, VT, Device, RsDiode, Source, led_is, pnjlim, sexp,
                       spike_message, v)
 
@@ -363,10 +364,11 @@ class MOSFET(Device):
             self._v_av = max(self._v_av, abs(vd - vs))
             if self._e_av > self.P.eas:
                 self.blown = True
-                self.event = (f"{self.comp.ref} was destroyed — it's rated for {vmax:.0f} V, but the circuit pushed "
-                              f"it past that: it broke down at {self._v_av:.0f} V and overheated. Use a higher-voltage "
-                              "MOSFET, or if it switches a coil or motor, put a diode across the coil to catch the "
-                              "spike.")
+                self.event = tr("{ref} was destroyed — it's rated for {vmax:.0f} V, but the circuit pushed "
+                                "it past that: it broke down at {v_av:.0f} V and overheated. Use a higher-voltage "
+                                "MOSFET, or if it switches a coil or motor, put a diode across the coil to catch the "
+                                "spike.",
+                                ref=self.comp.ref, vmax=vmax, v_av=self._v_av)
                 return
         else:
             self._e_av = self._v_av = 0.0
@@ -374,8 +376,9 @@ class MOSFET(Device):
         self.warn = "over" if (abs(self.id) > self.idmax or self.power > self.pmax) else None
         if self._overload(bad, ctx.h, 0.2):
             self.blown = True
-            self.event = (f"{self.comp.ref} burnt out — {self.power:.1f} W is too much for a "
-                          f"{self.prop('model')} without a heatsink.")
+            self.event = tr("{ref} burnt out — {power:.1f} W is too much for a "
+                            "{model} without a heatsink.",
+                            ref=self.comp.ref, power=self.power, model=self.prop('model'))
 
     def after_dc(self):
         """After the DC answer: the capacitors start charged to the voltages they're at."""
@@ -548,24 +551,31 @@ class OpAmp(Device):
         # its protection diodes only take a few tens of milliamps
         if not ctx.dc and self._overload(worst > 0.1, ctx.h, 1e-3, worst > 1.0):
             self.blown = True
-            self.event = (f"{self.comp.ref} was destroyed — its output was held {'above V+' if V[2] > V[3] else 'below V−'} "
-                          f"by something outside it, forcing {worst:.1f} A through its protection diodes. An op-amp's "
-                          "output must stay between its supply pins.")
+            if V[2] > V[3]:
+                self.event = tr("{ref} was destroyed — its output was held above V+ by something outside it, forcing "
+                                "{worst:.1f} A through its protection diodes. An op-amp's output must stay between "
+                                "its supply pins.", ref=self.comp.ref, worst=worst)
+            else:
+                self.event = tr("{ref} was destroyed — its output was held below V− by something outside it, forcing "
+                                "{worst:.1f} A through its protection diodes. An op-amp's output must stay between "
+                                "its supply pins.", ref=self.comp.ref, worst=worst)
             return
         self.vout = V[2]
         vp, vn = self.rails(x)
         self.power = sum(V[k] * self.i_pins[k] for k in range(5))
         if (vp - vn) < -1.0 and not ctx.dc and not (self.auto_pos or self.auto_neg):
             self.blown = True
-            self.event = (f"{self.comp.ref} was destroyed — its supply is the wrong way round (V+ is {vn - vp:.1f} V "
-                          "below V−). Swap the V+ and V− connections.")
+            self.event = tr("{ref} was destroyed — its supply is the wrong way round (V+ is {diff:.1f} V "
+                            "below V−). Swap the V+ and V− connections.",
+                            ref=self.comp.ref, diff=vn - vp)
             return
         over = (vp - vn) > self.D.vs_max
         self.warn = "over" if over else None
         if self._overload(over, ctx.h, 0.05, (vp - vn) > 1.3 * self.D.vs_max):
             self.blown = True
-            self.event = (f"{self.comp.ref} was destroyed — {vp - vn:.0f} V across its supply pins is more than "
-                          f"a {self.prop('model')} can take ({self.D.vs_max:.0f} V maximum).")
+            self.event = tr("{ref} was destroyed — {diff:.0f} V across its supply pins is more than "
+                            "a {model} can take ({vs_max:.0f} V maximum).",
+                            ref=self.comp.ref, diff=vp - vn, model=self.prop('model'), vs_max=self.D.vs_max)
 
 
 # ============================================================================================== 555 timer
@@ -750,9 +760,10 @@ class Digital(Device):
             self._told = True
             self.warn = "over"
             name = self.prop("model") if self.comp.part.prop("model") else self.comp.part.short or self.comp.part.name
-            self.event = (f"{self.comp.ref}: a {name} is made for up to {self.vmax:g} V, but this circuit's logic "
-                          f"supply is {self.vlogic:.0f} V — a real one would be damaged. Use a lower supply "
-                          "(4000-series chips run on up to 15 V).")
+            self.event = tr("{ref}: a {name} is made for up to {vmax:g} V, but this circuit's logic "
+                            "supply is {vlogic:.0f} V — a real one would be damaged. Use a lower supply "
+                            "(4000-series chips run on up to 15 V).",
+                            ref=self.comp.ref, name=name, vmax=self.vmax, vlogic=self.vlogic)
 
 
 class Gate(Digital):
@@ -1017,9 +1028,10 @@ class Mux4051(Digital):
         imax = self.D[1]
         if self._overload(abs(self.i_sw) > imax, ctx.h, 0.1, abs(self.i_sw) > 4 * imax):
             self.blown = True
-            self.event = (f"{self.comp.ref} burnt out — {abs(self.i_sw) * 1000:.0f} mA through its switch is more "
-                          f"than a {self.prop('model')} can take ({imax * 1000:.0f} mA). Its switches are for "
-                          "signals, not for driving loads.")
+            self.event = tr("{ref} burnt out — {i_sw:.0f} mA through its switch is more "
+                            "than a {model} can take ({imax:.0f} mA). Its switches are for "
+                            "signals, not for driving loads.",
+                            ref=self.comp.ref, i_sw=abs(self.i_sw) * 1000, model=self.prop('model'), imax=imax * 1000)
 
 
 # ============================================================================================== shunt regulator
@@ -1102,15 +1114,17 @@ class ShuntRef(Device):
         model = self.prop("model")
         if self.vd > 1.1 * self.vkmax:
             self.blown = True
-            self.event = (f"{self.comp.ref} was destroyed — {self.vd:.0f} V across it is more than a {model} can "
-                          f"take ({self.vkmax:g} V).")
+            self.event = tr("{ref} was destroyed — {vd:.0f} V across it is more than a {model} can "
+                            "take ({vkmax:g} V).",
+                            ref=self.comp.ref, vd=self.vd, model=model, vkmax=self.vkmax)
             return
         bad = self.current > self.imax
         self.warn = "over" if bad else None
         if self._overload(bad, ctx.h, 0.1, self.current > 4 * self.imax):
             self.blown = True
-            self.event = (f"{self.comp.ref} burnt out — {self.current * 1000:.0f} mA is more than a {model} can sink "
-                          f"({self.imax * 1000:.0f} mA). Use a bigger resistor in series with its cathode.")
+            self.event = tr("{ref} burnt out — {current:.0f} mA is more than a {model} can sink "
+                            "({imax:.0f} mA). Use a bigger resistor in series with its cathode.",
+                            ref=self.comp.ref, current=self.current * 1000, model=model, imax=self.imax * 1000)
 
 
 # ============================================================================================== solid-state relay
@@ -1228,8 +1242,9 @@ class SolidStateRelay(Device):
         v_out = abs(v(x, o1) - v(x, o2))
         if v_out > 1.3 * self.voff and self.drive < 0.5:
             self.blown = True
-            self.event = (f"{self.comp.ref} was destroyed — {v_out:.0f} V across its output is more than a {model} "
-                          f"can block ({self.voff:g} V).")
+            self.event = tr("{ref} was destroyed — {v_out:.0f} V across its output is more than a {model} "
+                            "can block ({voff:g} V).",
+                            ref=self.comp.ref, v_out=v_out, model=model, voff=self.voff)
             return
         led_bad = self.i_led > self.if_max
         out_bad = abs(i_o) > self.imax
@@ -1237,11 +1252,13 @@ class SolidStateRelay(Device):
         if self._overload(led_bad or out_bad, ctx.h, 0.1, self.i_led > 3 * self.if_max or abs(i_o) > 4 * self.imax):
             self.blown = True
             if led_bad:
-                self.event = (f"{self.comp.ref} popped! {self.i_led * 1000:.0f} mA is too much for the LED inside a "
-                              f"{model} (max {self.if_max * 1000:.0f} mA). Add a resistor in series with A–K.")
+                self.event = tr("{ref} popped! {i_led:.0f} mA is too much for the LED inside a "
+                                "{model} (max {if_max:.0f} mA). Add a resistor in series with A–K.",
+                                ref=self.comp.ref, i_led=self.i_led * 1000, model=model, if_max=self.if_max * 1000)
             else:
-                self.event = (f"{self.comp.ref} burnt out — {abs(i_o):.1f} A through its output is more than a "
-                              f"{model} can switch ({self.imax:g} A).")
+                self.event = tr("{ref} burnt out — {i_o:.1f} A through its output is more than a "
+                                "{model} can switch ({imax:g} A).",
+                                ref=self.comp.ref, i_o=abs(i_o), model=model, imax=self.imax)
 
     def light_now(self):
         return [0.0] if self.blown else [max(0.0, min(1.0, (self.i_led - 1e-4) / 0.005))]
@@ -1635,11 +1652,13 @@ class Optocoupler(BJT):
                           self.i_led > 3 * self.if_max or abs(i_c) > 4 * self.icmax):
             self.blown = True
             if led_bad:
-                self.event = (f"{ref} popped! {self.i_led * 1000:.0f} mA is too much for the LED inside a {model} "
-                              f"(max {self.if_max * 1000:.0f} mA). Add a resistor in series with pins A–K.")
+                self.event = tr("{ref} popped! {i_led:.0f} mA is too much for the LED inside a {model} "
+                                "(max {if_max:.0f} mA). Add a resistor in series with pins A–K.",
+                                ref=ref, i_led=self.i_led * 1000, model=model, if_max=self.if_max * 1000)
             else:
-                self.event = (f"{ref} burnt out — {abs(i_c) * 1000:.0f} mA through its output is too much for a "
-                              f"{model} (max {self.icmax * 1000:.0f} mA). Add a resistor to the load.")
+                self.event = tr("{ref} burnt out — {i_c:.0f} mA through its output is too much for a "
+                                "{model} (max {icmax:.0f} mA). Add a resistor to the load.",
+                                ref=ref, i_c=abs(i_c) * 1000, model=model, icmax=self.icmax * 1000)
 
     def light_now(self):
         return [0.0] if self.blown else [max(0.0, min(1.0, (self.i_led - 1e-4) / 0.01))]

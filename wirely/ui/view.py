@@ -5,6 +5,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, QVariantAnimation, QEasi
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QGraphicsView, QWidget
 
+from ..i18n import tr
+
 ZOOM_MIN, ZOOM_MAX = 0.2, 8.0
 
 
@@ -115,13 +117,14 @@ class CircuitView(QGraphicsView):
             f.setBold(True)
             p.setFont(f)
             p.setPen(QColor(theme.TEXT_MUTED))
-            p.drawText(r.adjusted(0, -30, 0, -30), Qt.AlignCenter, "Your circuit sheet is empty")
+            p.drawText(r.adjusted(0, -30, 0, -30), Qt.AlignCenter, tr("Your circuit sheet is empty"))
             f.setPixelSize(13)
             f.setBold(False)
             p.setFont(f)
             p.drawText(r.adjusted(0, 20, 0, 20), Qt.AlignCenter,
-                       "Drag parts here from the gallery on the left,\nthen drag from pin to pin to wire them up.\n"
-                       "Or open an example from the File menu.")
+                       tr("Drag parts here from the gallery on the left,") + "\n" +
+                       tr("then drag from pin to pin to wire them up.") + "\n" +
+                       tr("Or open an example from the File menu."))
             p.restore()
 
     def _draw_legend(self, p, sc):
@@ -157,6 +160,10 @@ class CircuitView(QGraphicsView):
         p.drawText(QRectF(bar.center().x() - 40, y, 80, 14), Qt.AlignCenter, fmt(vmax / 2, "V"))
         p.drawText(QRectF(bar.right() - 60, y, 60, 14), Qt.AlignRight, fmt(vmax, "V"))
         p.restore()
+
+    def retranslate(self):
+        self.clear_toasts()         # a message already showing is in the old language
+        self.viewport().update()
 
     def clear_toasts(self):
         for t in list(self._toasts):

@@ -14,7 +14,8 @@ import wirely  # noqa: E402
 VERSION, REV = wirely.__version__, wirely.__revision__
 ASSETS = os.path.join(ROOT, "wirely", "assets")
 
-datas = [(ASSETS, os.path.join("wirely", "assets")), (os.path.join(ROOT, "examples"), "examples")]
+datas = [(ASSETS, os.path.join("wirely", "assets")), (os.path.join(ROOT, "examples"), "examples"),
+         (os.path.join(ROOT, "wirely", "locale"), os.path.join("wirely", "locale"))]   # the language catalogues
 for f in ("README.md", "CHANGES.md", "LICENSE", "THIRD-PARTY-NOTICES.txt"):
     datas.append((os.path.join(ROOT, f), "."))
 

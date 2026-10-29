@@ -8,6 +8,8 @@ from __future__ import annotations
 import math
 import re
 
+from ..i18n import tr
+
 PREFIXES = {
     "p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "μ": 1e-6, "m": 1e-3,
     "": 1.0, "k": 1e3, "K": 1e3, "M": 1e6, "G": 1e9,
@@ -30,7 +32,7 @@ def parse(text, unit: str = "") -> float:
         return float(text)
     s = str(text).strip().replace(" ", "").replace(",", ".")
     if not s:
-        raise ValueError("Please type a value")
+        raise ValueError(tr("Please type a value"))
     if s.lower().endswith("meg"):           # SPICE style 1meg
         s = s[:-3] + "M"
     # strip a trailing unit word (longest first), e.g. "10kΩ", "4.7uF", "9V"
@@ -49,7 +51,7 @@ def parse(text, unit: str = "") -> float:
         return float(f"{whole}.{frac}") * mult
     m = re.fullmatch(r"(" + _NUM + r")([pnuµμmkKMG]?)", s)
     if not m:
-        raise ValueError(f"'{text}' isn't a value I understand (try e.g. 10k, 4k7, 100n)")
+        raise ValueError(tr("'{text}' isn't a value I understand (try e.g. 10k, 4k7, 100n)", text=text))
     return float(m.group(1)) * PREFIXES[m.group(2)]
 
 

@@ -9,7 +9,7 @@
 
 const PYODIDE_VERSION = "314.0.7";
 const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
-const SANS = '"Inter", "Segoe UI", "Helvetica Neue", "Noto Sans", Roboto, Arial, sans-serif';
+const SANS = '"Inter", "Segoe UI", "Helvetica Neue", "Noto Sans", Roboto, Arial, "Hiragino Sans", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif';
 const MONO = '"Cascadia Mono", "Consolas", "DejaVu Sans Mono", "Menlo", monospace';
 const ZOOM_MIN = 0.2, ZOOM_MAX = 8.0;
 const QT_SHIFT = 0x2000000, QT_CTRL = 0x4000000;
@@ -28,6 +28,59 @@ let ready = false;
 let colours = {};
 let ui = {};              // last App.state()
 let numpyKind = "";
+
+// ============================================================================================ language
+/* Every word the page shows goes through tr(): the English is the key into locale/<code>.json (the same
+   catalogues the Python side reads), and anything without a translation simply shows in English. Saved
+   circuits never hold translated text, so a circuit made in one language opens in any other. */
+const LANGS = [["en", "English"], ["es", "Español"], ["de", "Deutsch"], ["ja", "日本語"]];
+const HTML_LANG = { en: "en-GB", es: "es", de: "de", ja: "ja" };
+let lang = "en";
+let catalog = {};
+function tr(text, vars) {
+  let s = Object.prototype.hasOwnProperty.call(catalog, text) ? catalog[text] : text;
+  if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+  return s;
+}
+function trn(one, other, n) { return tr(n === 1 ? one : other, { n }); }
+function savedLanguage() {
+  const asked = params.get("lang");
+  if (asked && LANGS.some(([c]) => c === asked)) return asked;
+  try { const s = localStorage.getItem("wirely-language"); if (LANGS.some(([c]) => c === s)) return s; } catch (e) { /* storage off */ }
+  return "en";
+}
+async function loadCatalog(code) {
+  if (code === "en") return {};
+  try {
+    const r = await fetch(`locale/${code}.json`);
+    return r.ok ? await r.json() : {};
+  } catch (e) { console.warn("no translations for", code, e); return {}; }
+}
+// the page's own fixed text (index.html): remember the English once, then show it in any language
+const domTexts = [];
+function collectDom() {
+  const attrs = ["title", "placeholder", "aria-label", "alt"];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const en = n.nodeValue.trim();
+    if (en && !["SCRIPT", "STYLE"].includes(n.parentNode.nodeName)) domTexts.push({ node: n, en, pad: n.nodeValue });
+  }
+  document.querySelectorAll("body *").forEach((el) => {
+    for (const a of attrs) if (el.hasAttribute(a)) domTexts.push({ el, attr: a, en: el.getAttribute(a) });
+  });
+  const title = document.querySelector("title");
+  if (title && title.firstChild) domTexts.push({ node: title.firstChild, en: title.textContent.trim(), pad: title.textContent, head: true });
+  const meta = document.querySelector('meta[name="description"]');
+  if (meta) domTexts.push({ el: meta, attr: "content", en: meta.getAttribute("content"), head: true });
+}
+function applyDom() {
+  for (const d of domTexts) {
+    if (d.node) {
+      if (d.head || d.node.isConnected) d.node.nodeValue = d.pad.replace(d.en, tr(d.en));
+    } else if (d.head || d.el.isConnected) d.el.setAttribute(d.attr, tr(d.en));
+  }
+  document.documentElement.lang = HTML_LANG[lang] || "en";
+}
 
 // ============================================================================================ text measuring
 const measureCtx = document.createElement("canvas").getContext("2d");
@@ -222,14 +275,46 @@ function loadScript(src) {
     const s = document.createElement("script");
     s.src = src;
     s.onload = resolve;
-    s.onerror = () => reject(new Error("couldn't load " + src));
+    s.onerror = () => reject(new Error(tr("couldn't load {src}", { src })));
     document.head.appendChild(s);
   });
 }
 
+async function setLanguage(code) {
+  if (!LANGS.some(([c]) => c === code)) code = "en";
+  lang = code;
+  catalog = await loadCatalog(code);
+  try { localStorage.setItem("wirely-language", code); } catch (e) { /* storage is off: it just isn't remembered */ }
+  if (app) app.set_language(code);
+  applyDom();
+  if (ready) {
+    refreshTexts();
+    refreshUI();
+    requestDraw();
+  }
+}
+
+// the pieces of the page whose words come from Python (or were built from text): write them again
+function refreshTexts() {
+  setupGallery();
+  const q = $("filter");
+  if (q.value) q.dispatchEvent(new Event("input"));
+  const sp = $("speed");
+  J(app.speeds()).forEach(([label], i) => { if (sp.options[i]) sp.options[i].textContent = label; });
+  const ch = J(app.graph_choices());
+  for (const [id, list] of [["tbox", ch.time], ["vbox", ch.volts]]) {
+    list.forEach((name, i) => { const o = $(id).options[i]; if (o) o.textContent = name; });
+  }
+  if (graphShown()) drawGraph();
+}
+
 async function boot() {
   try {
-    setProgress(0.05, "Loading Python (the first time takes a little while)…");
+    lang = savedLanguage();
+    catalog = await loadCatalog(lang);
+    collectDom();
+    applyDom();
+    setProgress(0.05, tr("Loading Python (the first time takes a little while)…"));
     let base = "pyodide/";
     try {
       await loadScript(base + "pyodide.js");
@@ -237,9 +322,9 @@ async function boot() {
       base = PYODIDE_CDN;
       await loadScript(base + "pyodide.js");
     }
-    setProgress(0.35, "Starting Python…");
+    setProgress(0.35, tr("Starting Python…"));
     py = await loadPyodide({ indexURL: base, stdout: (s) => console.log(s), stderr: (s) => console.warn(s) });
-    setProgress(0.55, "Loading the maths library…");
+    setProgress(0.55, tr("Loading the maths library…"));
     let haveNumpy = false;
     if (params.get("numpy") !== "lite") {
       try {
@@ -251,9 +336,9 @@ async function boot() {
       }
     }
     numpyKind = haveNumpy ? "numpy" : "built-in maths";
-    setProgress(0.75, "Loading Wirely…");
+    setProgress(0.75, tr("Loading Wirely…"));
     const zipResp = await fetch("wirely-py.zip", { cache: "no-cache" });
-    if (!zipResp.ok) throw new Error("couldn't load wirely-py.zip (" + zipResp.status + ")");
+    if (!zipResp.ok) throw new Error(tr("couldn't load wirely-py.zip ({status})", { status: zipResp.status }));
     py.unpackArchive(await zipResp.arrayBuffer(), "zip", { extractDir: "/home/pyodide/wirely_app" });
     py.runPython(`
 import sys
@@ -261,8 +346,9 @@ sys.path.insert(0, "/home/pyodide/wirely_app")
 if ${haveNumpy ? "False" : "True"}:
     sys.path.insert(0, "/home/pyodide/wirely_app/fallback")
 `);
-    setProgress(0.9, "Getting the parts ready…");
+    setProgress(0.9, tr("Getting the parts ready…"));
     app = py.runPython("import wirely_web\nwirely_web.App()");
+    app.set_language(lang);
     $("ver").textContent = "v" + app.version();
     await setupUI();
     ready = true;
@@ -273,9 +359,9 @@ if ${haveNumpy ? "False" : "True"}:
   } catch (e) {
     console.error(e);
     $("loadText").classList.add("error");
-    $("loadText").innerHTML = "Sorry — Wirely couldn't start in this browser.<br>" + escapeHtml(String(e && e.message || e)) +
-      "<br><br>Try reloading the page. Wirely works in recent versions of Chrome, Edge, Firefox and Safari." +
-      ' You can also <a href="https://github.com/wirely-app/wirely-app.github.io/releases/latest">download the desktop app</a>.';
+    $("loadText").innerHTML = escapeHtml(tr("Sorry — Wirely couldn't start in this browser.")) + "<br>" + escapeHtml(String(e && e.message || e)) +
+      "<br><br>" + escapeHtml(tr("Try reloading the page. Wirely works in recent versions of Chrome, Edge, Firefox and Safari.")) +
+      ' <a href="https://github.com/wirely-app/wirely-app.github.io/releases/latest">' + escapeHtml(tr("You can also download the desktop app.")) + "</a>";
   }
 }
 
@@ -479,8 +565,8 @@ function afterTick() {
   showToasts();
   if (!info) { refreshUI(); return; }
   $("timeLabel").textContent = info.time;
-  $("timeLabel").title = info.behind ? "This circuit is too busy to simulate in real time, so it runs slower."
-    : "Simulated time since you pressed Run";
+  $("timeLabel").title = info.behind ? tr("This circuit is too busy to simulate in real time, so it runs slower.")
+    : tr("Simulated time since you pressed Run");
   updateLegend(info);
   Sound.update(info.sound, info.clicks);
   if (graphShown()) drawGraph();
@@ -695,8 +781,8 @@ const ACTIONS = {
   copy: () => { const t = app.action("copy"); if (t) clipboardWrite(t); },
   copy_readings: () => {
     const t = app.action("copy_readings");
-    if (t) { clipboardWrite(t); toast("Readings copied — paste them into a spreadsheet or document.", "ok", null, 3000); }
-    else toast("Press Run first — then copy the readings.", "info");
+    if (t) { clipboardWrite(t); toast(tr("Readings copied — paste them into a spreadsheet or document."), "ok", null, 3000); }
+    else toast(tr("Press Run first — then copy the readings."), "info");
   },
   cut: () => { const t = app.action("cut"); if (t) clipboardWrite(t); },
   paste: () => pasteFromClipboard(),
@@ -786,8 +872,8 @@ function refreshUI() {
   en("flip", (ui.comps > 0 || ui.mode === "place") && !running);
   en("delete", ui.sel && !running);
   en("play", ui.sim !== "running"); en("pause", ui.sim === "running"); en("stop", !stopped);
-  tb.play.title = ui.sim === "paused" ? "Resume  (F5)" : "Run the circuit — watch it work  (F5)";
-  tb.play.querySelector(".label").textContent = ui.sim === "paused" ? "Resume" : "Run";
+  tb.play.title = (ui.sim === "paused" ? tr("Resume") : tr("Run the circuit — watch it work")) + "  (F5)";
+  tb.play.querySelector(".label").textContent = ui.sim === "paused" ? tr("Resume") : tr("Run");
   chk("volts", ui.volts); chk("flow", ui.flow); chk("readings", ui.readings); chk("sound", ui.sound); chk("graph", ui.graph); chk("dark", ui.dark);
   $("gallery").classList.toggle("disabled", !stopped);
   $("hint").textContent = ui.status;
@@ -846,6 +932,7 @@ const MENUS = {
     [check(ui.grid) + "Show grid", "grid", "G"], [check(ui.dark) + "Dark theme", "dark", ""],
     [check(ui.us) + "US symbols", "us_symbols", ""],
   ],
+  language: () => LANGS.map(([code, name]) => [check(code === lang) + name, "lang:" + code, ""]),
   help: () => [
     ["Mouse and keyboard…", "help", "F1"],
     ["Get the desktop app", "desktop", ""],
@@ -855,6 +942,16 @@ const MENUS = {
   ],
 };
 function check(on) { return on ? "✓ " : " "; }
+// menu text is written in English above; show it in the chosen language (keeping the tick in front)
+function trItems(items) {
+  return items.map((it) => {
+    if (it === null) return null;
+    if (typeof it === "string") return tr(it);
+    const pre = /^(✓ |\u2003)/.exec(it[0]);
+    const p = pre ? pre[0] : "";
+    return [p + tr(it[0].slice(p.length)), ...it.slice(1)];
+  });
+}
 
 let openMenu = null;
 function closeMenus() {
@@ -885,6 +982,7 @@ function showPopup(items, x, y, onPick) {
 }
 
 function pickMenu(act) {
+  if (act.startsWith("lang:")) { closeMenus(); setLanguage(act.slice(5)); return; }
   if (act === "examples") { showExamplesMenu(); return; }
   if (act === "desktop") { window.open("https://github.com/wirely-app/wirely-app.github.io/releases/latest", "_blank", "noopener"); closeMenus(); return; }
   if (act === "github") { window.open("https://github.com/wirely-app/wirely-app.github.io", "_blank", "noopener"); closeMenus(); return; }
@@ -899,7 +997,8 @@ document.querySelectorAll(".menuBtn").forEach((b) => {
     openMenu = b.dataset.menu;
     b.classList.add("open");
     const r = b.getBoundingClientRect();
-    showPopup(MENUS[openMenu](), r.left, r.bottom + 2, pickMenu);
+    const items = MENUS[openMenu]();
+    showPopup(openMenu === "language" ? items : trItems(items), r.left, r.bottom + 2, pickMenu);
   };
   b.addEventListener("click", (e) => { e.stopPropagation(); if (openMenu === b.dataset.menu) closeMenus(); else open(); });
   b.addEventListener("mouseenter", () => { if (openMenu && openMenu !== b.dataset.menu) open(); });
@@ -932,8 +1031,8 @@ function setupGallery() {
       const t = document.createElement("div");
       t.className = "tile";
       t.dataset.kind = p.key;
-      t.dataset.search = (p.name + " " + p.tile + " " + p.keywords + " " + cat.name).toLowerCase();
-      t.title = `${p.name}\n${p.description}\nClick, then click on the sheet — or drag it there.`;
+      t.dataset.search = (p.name + " " + p.tile + " " + p.keywords + " " + cat.search).toLowerCase();
+      t.title = `${p.name}\n${p.description}\n${tr("Click, then click on the sheet — or drag it there.")}`;
       const c = document.createElement("canvas");
       opsCanvas(c, p.icon, 62, 40);
       const s = document.createElement("span");
@@ -1070,26 +1169,27 @@ function editPart(cid) {
   if (!form) return;
   let html = `<div class="dlgTop"><canvas id="dlgIcon"></canvas><div><div class="dlgTitle">${escapeHtml(form.name)}</div>
     <div class="hint">${escapeHtml(form.description)}</div></div></div><div class="form">
-    <label for="f__ref">Label</label><input type="text" id="f__ref" value="${escapeHtml(form.ref)}" title="The label on the diagram, e.g. R1">`;
+    <label for="f__ref">${escapeHtml(tr("Label"))}</label><input type="text" id="f__ref" value="${escapeHtml(form.ref)}" title="${escapeHtml(tr("The label on the diagram, e.g. R1"))}">`;
   for (const f of form.fields) {
     const id = "f_" + f.key;
     html += `<label for="${id}">${escapeHtml(f.label)}</label>`;
     if (f.kind === "bool") html += `<div><input type="checkbox" id="${id}" ${f.value ? "checked" : ""}></div>`;
     else if (f.kind === "text") html += `<textarea id="${id}">${escapeHtml(f.value)}</textarea>`;
     else if (f.kind === "choice") {
-      const opts = f.choices.map((c) => `<option ${c === f.value ? "selected" : ""} title="${escapeHtml((f.info && f.info[c]) || "")}">${escapeHtml(c)}</option>`).join("");
+      // the value that is saved stays English; only the words shown are translated
+      const opts = f.choices.map((c, i) => `<option value="${escapeHtml(c)}" ${c === f.value ? "selected" : ""} title="${escapeHtml((f.info && f.info[c]) || "")}">${escapeHtml(f.choice_labels ? f.choice_labels[i] : c)}</option>`).join("");
       if (f.colours) html += `<div class="swatchRow"><span class="swatch" id="${id}_sw"></span><select id="${id}">${opts}</select></div>`;
       else html += `<select id="${id}">${opts}</select>`;
       if (f.info) html += `<div class="hint info" id="${id}_info"></div>`;
     } else if (f.units) {           // the number, with its size beside it: Ω / kΩ / MΩ, pF / nF / µF …
       const opts = f.units.map((u) => `<option ${u === f.unit ? "selected" : ""}>${escapeHtml(u)}</option>`).join("");
-      html += `<div class="unitRow"><input type="text" id="${id}" value="${escapeHtml(f.value)}" placeholder="${escapeHtml(f.placeholder || "")}" title="${escapeHtml(f.help || "")}" spellcheck="false" autocomplete="off" inputmode="decimal"><select id="${id}__unit" title="Ω, kΩ (thousand), MΩ (million) … or pF, nF, µF …">${opts}</select></div>`;
+      html += `<div class="unitRow"><input type="text" id="${id}" value="${escapeHtml(f.value)}" placeholder="${escapeHtml(f.placeholder || "")}" title="${escapeHtml(f.help || "")}" spellcheck="false" autocomplete="off" inputmode="decimal"><select id="${id}__unit" title="${escapeHtml(tr("Ω, kΩ (thousand), MΩ (million) … or pF, nF, µF …"))}">${opts}</select></div>`;
     } else {
       html += `<input type="text" id="${id}" value="${escapeHtml(f.value)}" placeholder="${escapeHtml(f.placeholder || "")}" title="${escapeHtml(f.help || "")}" spellcheck="false" autocomplete="off">`;
     }
   }
   html += `</div><div class="dlgError" id="dlgError"></div>
-    <div class="dlgButtons"><button class="btn" id="dlgCancel">Cancel</button><button class="btn primary" id="dlgOk">OK</button></div>`;
+    <div class="dlgButtons"><button class="btn" id="dlgCancel">${escapeHtml(tr("Cancel"))}</button><button class="btn primary" id="dlgOk">${escapeHtml(tr("OK"))}</button></div>`;
   openDialog(html, (d) => {
     opsCanvas(d.querySelector("#dlgIcon"), form.icon, 76, 50);
     const read = () => {
@@ -1154,16 +1254,16 @@ function showBom() {
   const rows = J(app.bom());
   const n = rows.reduce((a, r) => a + r.qty, 0);
   const body = rows.map((r) => `<tr><td>${r.qty}</td><td>${escapeHtml(r.description)}</td><td>${escapeHtml(r.refs.join(", "))}</td></tr>`).join("");
-  openDialog(`<div class="dlgTitle">Parts list — ${n} part${n === 1 ? "" : "s"}</div>
-    <table class="bom"><tr><th>Qty</th><th>Part</th><th>Labels</th></tr>${body}</table>
-    <div class="dlgButtons"><button class="btn" id="bomCopy">Copy</button><button class="btn" id="bomCsv">Save as CSV…</button>
-    <span class="spacer"></span><button class="btn primary" id="bomClose">Close</button></div>`, (d) => {
+  openDialog(`<div class="dlgTitle">${escapeHtml(tr("Parts list — {n} parts", { n }))}</div>
+    <table class="bom"><tr><th>${escapeHtml(tr("Qty"))}</th><th>${escapeHtml(tr("Part"))}</th><th>${escapeHtml(tr("Labels"))}</th></tr>${body}</table>
+    <div class="dlgButtons"><button class="btn" id="bomCopy">${escapeHtml(tr("Copy"))}</button><button class="btn" id="bomCsv">${escapeHtml(tr("Save as CSV…"))}</button>
+    <span class="spacer"></span><button class="btn primary" id="bomClose">${escapeHtml(tr("Close"))}</button></div>`, (d) => {
     d.querySelector("#bomClose").addEventListener("click", closeDialog);
     d.querySelector("#bomCopy").addEventListener("click", () => {
-      clipboardWrite("Qty\tPart\tLabels\n" + rows.map((r) => `${r.qty}\t${r.description}\t${r.refs.join(", ")}`).join("\n"));
-      toast("Parts list copied.", "ok", null, 2500);
+      clipboardWrite([tr("Qty"), tr("Part"), tr("Labels")].join("\t") + "\n" + rows.map((r) => `${r.qty}\t${r.description}\t${r.refs.join(", ")}`).join("\n"));
+      toast(tr("Parts list copied."), "ok", null, 2500);
     });
-    d.querySelector("#bomCsv").addEventListener("click", () => download(new Blob([app.bom_csv()], { type: "text/csv" }), "parts list.csv"));
+    d.querySelector("#bomCsv").addEventListener("click", () => download(new Blob([app.bom_csv()], { type: "text/csv" }), tr("parts list") + ".csv"));
   });
 }
 
@@ -1175,24 +1275,23 @@ json.dumps(SHORTCUTS)`));
   const web = [["On a Chromebook or touchpad", "Two-finger scroll pans; pinch (or Ctrl + scroll) zooms"],
     ["On a touch screen", "Drag the sheet with one finger to pan, pinch to zoom; double-tap a part to change it"],
     ["Save your work", "Ctrl+S saves a .wirely file you can open again here or in the desktop app"]];
-  const html = rows.concat(web).map(([a, b]) => `<b>${escapeHtml(a)}</b><span>${escapeHtml(b)}</span>`).join("");
-  openDialog(`<div class="dlgTitle">Mouse and keyboard</div><div class="keys">${html}</div>
-    <div class="dlgButtons"><button class="btn primary" id="hClose">Close</button></div>`,
+  const html = rows.concat(web).map(([a, b]) => `<b>${escapeHtml(tr(a))}</b><span>${escapeHtml(tr(b))}</span>`).join("");
+  openDialog(`<div class="dlgTitle">${escapeHtml(tr("Mouse and keyboard"))}</div><div class="keys">${html}</div>
+    <div class="dlgButtons"><button class="btn primary" id="hClose">${escapeHtml(tr("Close"))}</button></div>`,
     (d) => d.querySelector("#hClose").addEventListener("click", closeDialog));
 }
 
 function showAbout() {
   const v = app.version();
-  openDialog(`<div class="about"><div class="dlgTop"><canvas id="abMark"></canvas><div><div class="dlgTitle">Wirely ${escapeHtml(v)} — web version</div>
-    <div class="hint">Draw a circuit, press play, watch it work.</div></div></div>
-    <p>Free and open source under the GNU GPL v3. By Richard Willmott, built with help from Claude.</p>
-    <p>This is the same Wirely as the desktop app — the same parts, drawings and simulator — running in your browser
-    with <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a> (Python for the web). Nothing is uploaded:
-    your circuits stay on your computer.</p>
-    <p><a href="https://github.com/wirely-app/wirely-app.github.io" target="_blank" rel="noopener">Wirely on GitHub</a> ·
-    <a href="https://github.com/wirely-app/wirely-app.github.io/releases/latest" target="_blank" rel="noopener">Desktop app for Windows, Mac and Linux</a></p>
-    <p class="hint">Maths: ${escapeHtml(numpyKind)}</p></div>
-    <div class="dlgButtons"><button class="btn primary" id="aClose">Close</button></div>`, (d) => {
+  openDialog(`<div class="about"><div class="dlgTop"><canvas id="abMark"></canvas><div><div class="dlgTitle">${escapeHtml(tr("Wirely {version} — web version", { version: v }))}</div>
+    <div class="hint">${escapeHtml(tr("Draw a circuit, press play, watch it work."))}</div></div></div>
+    <p>${escapeHtml(tr("Free and open source under the GNU GPL v3. By Richard Willmott, built with help from Claude."))}</p>
+    <p>${escapeHtml(tr("This is the same Wirely as the desktop app — the same parts, drawings and simulator — running in your browser with"))}
+    <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a> ${escapeHtml(tr("(Python for the web). Nothing is uploaded: your circuits stay on your computer."))}</p>
+    <p><a href="https://github.com/wirely-app/wirely-app.github.io" target="_blank" rel="noopener">${escapeHtml(tr("Wirely on GitHub"))}</a> ·
+    <a href="https://github.com/wirely-app/wirely-app.github.io/releases/latest" target="_blank" rel="noopener">${escapeHtml(tr("Desktop app for Windows, Mac and Linux"))}</a></p>
+    <p class="hint">${escapeHtml(tr("Maths: {kind}", { kind: numpyKind }))}</p></div>
+    <div class="dlgButtons"><button class="btn primary" id="aClose">${escapeHtml(tr("Close"))}</button></div>`, (d) => {
     opsCanvas(d.querySelector("#abMark"), J(app.logo_ops()), 50, 50, 50 / 32);
     d.querySelector("#aClose").addEventListener("click", closeDialog);
   });
@@ -1200,10 +1299,10 @@ function showAbout() {
 
 function confirmDiscard(then) {
   if (!ui.dirty || ui.empty) { then(); return; }
-  openDialog(`<div class="dlgTitle">Save changes to this circuit first?</div>
-    <p class="hint">If you don't save, your changes to “${escapeHtml(ui.name)}” will be lost.</p>
-    <div class="dlgButtons"><button class="btn" id="cdDiscard">Don't save</button><span class="spacer"></span>
-    <button class="btn" id="cdCancel">Cancel</button><button class="btn primary" id="cdSave">Save</button></div>`, (d) => {
+  openDialog(`<div class="dlgTitle">${escapeHtml(tr("Save changes to this circuit first?"))}</div>
+    <p class="hint">${escapeHtml(tr("If you don't save, your changes to “{name}” will be lost.", { name: ui.name }))}</p>
+    <div class="dlgButtons"><button class="btn" id="cdDiscard">${escapeHtml(tr("Don't save"))}</button><span class="spacer"></span>
+    <button class="btn" id="cdCancel">${escapeHtml(tr("Cancel"))}</button><button class="btn primary" id="cdSave">${escapeHtml(tr("Save"))}</button></div>`, (d) => {
     d.querySelector("#cdCancel").addEventListener("click", closeDialog);
     d.querySelector("#cdDiscard").addEventListener("click", () => { closeDialog(); then(); });
     d.querySelector("#cdSave").addEventListener("click", async () => {
@@ -1231,7 +1330,7 @@ const Files = {
   async open() {
     if (window.showOpenFilePicker) {
       try {
-        const [h] = await window.showOpenFilePicker({ types: [{ description: "Wirely circuit", accept: { "application/json": [".wirely", ".spark"] } }] });
+        const [h] = await window.showOpenFilePicker({ types: [{ description: tr("Wirely circuit"), accept: { "application/json": [".wirely", ".spark"] } }] });
         const file = await h.getFile();
         if (this.load(await file.text(), file.name)) this.handle = h;
         return;
@@ -1250,13 +1349,13 @@ const Files = {
     return true;
   },
   async save(asNew) {
-    const name = safeName(ui.name === "Untitled" ? "circuit" : ui.name) + ".wirely";
+    const name = safeName(ui.untitled ? "circuit" : ui.name) + ".wirely";
     const text = app.save_text();
     if (window.showSaveFilePicker) {
       try {
         if (!this.handle || asNew) {
           this.handle = await window.showSaveFilePicker({ suggestedName: name,
-            types: [{ description: "Wirely circuit", accept: { "application/json": [".wirely"] } }] });
+            types: [{ description: tr("Wirely circuit"), accept: { "application/json": [".wirely"] } }] });
         }
         const w = await this.handle.createWritable();
         await w.write(text);
@@ -1264,7 +1363,7 @@ const Files = {
         app.mark_saved(baseName(this.handle.name));
         Autosave.clear();
         refreshUI();
-        toast(`Saved ${this.handle.name}`, "ok", null, 2500);
+        toast(tr("Saved {name}", { name: this.handle.name }), "ok", null, 2500);
         return true;
       } catch (e) {
         if (e && e.name === "AbortError") return false;
@@ -1276,7 +1375,7 @@ const Files = {
     app.mark_saved();
     Autosave.clear();
     refreshUI();
-    toast(`Saved ${name} to your Downloads.`, "ok", null, 3500);
+    toast(tr("Saved {name} to your Downloads.", { name }), "ok", null, 3500);
     return true;
   },
 };
@@ -1311,7 +1410,7 @@ async function loadExampleList() {
 function showExamplesMenu() {
   const pop = $("menuPopup");
   const r = pop.getBoundingClientRect();
-  const items = ["Examples"].concat(examples.map((name) => [name, name, ""]));
+  const items = [tr("Examples")].concat(examples.map((name) => [tr(name), name, ""]));
   showPopup(items, r.left, r.top, (name) => { closeMenus(); confirmDiscard(() => openExample(name)); });
 }
 async function openExample(name) {
@@ -1323,7 +1422,7 @@ async function openExample(name) {
     Files.handle = null;
     afterOpen();
   } catch (e) {
-    toast(`Couldn't open the example “${name}”.`, "error");
+    toast(tr("Couldn't open the example “{name}”.", { name }), "error");
   }
 }
 
@@ -1345,7 +1444,7 @@ async function decompress(s) {
   return await new Response(new Blob([b]).stream().pipeThrough(ds)).text();
 }
 async function shareLink() {
-  if (ui.empty) { toast("Draw a circuit first — then you can share a link to it.", "info"); return; }
+  if (ui.empty) { toast(tr("Draw a circuit first — then you can share a link to it."), "info"); return; }
   try {
     const d = JSON.parse(app.save_text());
     const text = JSON.stringify(d);
@@ -1353,18 +1452,17 @@ async function shareLink() {
     const name = encodeURIComponent(ui.name || "circuit");
     const url = location.origin + location.pathname + "#n=" + name + "&c=" + code;
     clipboardWrite(url);
-    openDialog(`<div class="dlgTitle">A link to this circuit</div>
-      <p class="hint">Anyone who opens this link sees a copy of your circuit in Wirely (the circuit is inside the link itself —
-      nothing is uploaded). It has been copied: paste it into Google Classroom, Teams or an email.</p>
+    openDialog(`<div class="dlgTitle">${escapeHtml(tr("A link to this circuit"))}</div>
+      <p class="hint">${escapeHtml(tr("Anyone who opens this link sees a copy of your circuit in Wirely (the circuit is inside the link itself — nothing is uploaded). It has been copied: paste it into Google Classroom, Teams or an email."))}</p>
       <div class="form" style="grid-template-columns:1fr"><input type="text" id="shareUrl" readonly value="${escapeHtml(url)}"></div>
-      <div class="dlgButtons"><button class="btn" id="shCopy">Copy again</button><button class="btn primary" id="shClose">Close</button></div>`, (d) => {
+      <div class="dlgButtons"><button class="btn" id="shCopy">${escapeHtml(tr("Copy again"))}</button><button class="btn primary" id="shClose">${escapeHtml(tr("Close"))}</button></div>`, (d) => {
       const inp = d.querySelector("#shareUrl");
       setTimeout(() => inp.select(), 0);
-      d.querySelector("#shCopy").addEventListener("click", () => { inp.select(); clipboardWrite(url); toast("Link copied.", "ok", null, 2000); });
+      d.querySelector("#shCopy").addEventListener("click", () => { inp.select(); clipboardWrite(url); toast(tr("Link copied."), "ok", null, 2000); });
       d.querySelector("#shClose").addEventListener("click", closeDialog);
     });
   } catch (e) {
-    toast("Sorry — this browser can't make circuit links.", "error");
+    toast(tr("Sorry — this browser can't make circuit links."), "error");
   }
 }
 
@@ -1374,11 +1472,11 @@ async function openLinkCircuit() {
   if (!h.get("c")) return false;
   try {
     const text = await decompress(h.get("c"));
-    const err = app.load(text, h.get("n") || "Shared circuit");
+    const err = app.load(text, h.get("n") || tr("Shared circuit"));
     if (!err) { app.mark_saved(); Files.handle = null; afterOpen(); return true; }
     toast(err, "error");
   } catch (e) {
-    toast("That circuit link looks damaged — it couldn't be opened. Check the whole link was copied.", "error");
+    toast(tr("That circuit link looks damaged — it couldn't be opened. Check the whole link was copied."), "error");
   }
   return false;
 }
@@ -1436,10 +1534,10 @@ const Autosave = {
     let d = null;
     try { d = JSON.parse(localStorage.getItem(this.key) || "null"); } catch (e) { d = null; }
     if (!d || !d.text) return;
-    const when = new Date(d.t).toLocaleString();
-    toast(`Wirely kept a copy of “${d.name}” from ${when} that wasn't saved.`, "info", [
-      ["Open it", () => { if (!app.load(d.text, d.name)) { afterOpen(); app.action("noop"); refreshUI(); } }],
-      ["No thanks", () => this.clear()],
+    const when = new Date(d.t).toLocaleString(HTML_LANG[lang]);
+    toast(tr("Wirely kept a copy of “{name}” from {when} that wasn't saved.", { name: d.name, when }), "info", [
+      [tr("Open it"), () => { if (!app.load(d.text, d.name)) { afterOpen(); app.action("noop"); refreshUI(); } }],
+      [tr("No thanks"), () => this.clear()],
     ], 0);
   },
 };
@@ -1450,7 +1548,7 @@ window.addEventListener("beforeunload", (e) => {
 
 // ---- pictures of the diagram
 async function exportPicture(toClipboard) {
-  if (ui.empty) { toast("There's nothing to save yet — add some parts first.", "info"); return; }
+  if (ui.empty) { toast(tr("There's nothing to save yet — add some parts first."), "info"); return; }
   const f = J(app.export_frame());
   const [x, y, w, h] = f.rect;
   const scale = 3;
@@ -1466,11 +1564,11 @@ async function exportPicture(toClipboard) {
   if (toClipboard) {
     try {
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-      toast("Picture copied — paste it into your document.", "ok", null, 3000);
+      toast(tr("Picture copied — paste it into your document."), "ok", null, 3000);
       return;
-    } catch (e) { toast("This browser won't copy pictures, so it has been saved instead.", "info"); }
+    } catch (e) { toast(tr("This browser won't copy pictures, so it has been saved instead."), "info"); }
   }
-  download(blob, safeName(ui.name === "Untitled" ? "circuit" : ui.name) + ".png");
+  download(blob, safeName(ui.untitled ? "circuit" : ui.name) + ".png");
 }
 
 // ============================================================================================ the graph
@@ -1489,7 +1587,7 @@ function setupGraph() {
   $("graphPic").addEventListener("click", () => plot.toBlob((b) => download(b, "graph.png"), "image/png"));
   $("graphCsv").addEventListener("click", () => {
     const csv = app.graph_csv();
-    if (!csv) { toast("No readings yet — put a graph probe on a wire and press Run.", "info"); return; }
+    if (!csv) { toast(tr("No readings yet — put a graph probe on a wire and press Run."), "info"); return; }
     download(new Blob([csv], { type: "text/csv" }), "graph readings.csv");
   });
   plot.addEventListener("pointermove", (e) => { const r = plot.getBoundingClientRect(); plotMouse = [e.clientX - r.left, e.clientY - r.top]; drawGraph(); });
@@ -1644,7 +1742,7 @@ if ("serviceWorker" in navigator && !params.has("nosw") &&
     if (!hadController || reloading) return;          // the very first visit: nothing older to replace
     const safe = !ready || ((!ui.dirty || ui.empty) && ui.sim === "stopped");
     if (safe) { reloading = true; location.reload(); return; }
-    toast("A new version of Wirely is ready.", "info", [["Reload", () => { reloading = true; location.reload(); }]], 0);
+    toast(tr("A new version of Wirely is ready."), "info", [[tr("Reload"), () => { reloading = true; location.reload(); }]], 0);
   });
 }
 

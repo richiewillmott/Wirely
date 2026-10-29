@@ -5,6 +5,7 @@ from PySide6.QtCore import QByteArray, QMimeData, QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QDrag
 from PySide6.QtWidgets import (QGridLayout, QLabel, QLineEdit, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
+from ..i18n import tr
 from ..model import parts as P
 from . import symbols as S
 from . import theme
@@ -24,22 +25,27 @@ class PartTile(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedSize(TILE_W, TILE_H)
         self.setCursor(Qt.OpenHandCursor)
-        self.setToolTip(f"<b>{part.name}</b><br>{part.description}<br><i>Click, then click on the sheet — "
-                        f"or drag it there.</i>")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(3, 6, 3, 3)
         lay.setSpacing(2)
         self.pic = QLabel()
         self.pic.setAlignment(Qt.AlignCenter)
         self.pic.setFixedHeight(ICON_H + 2)
-        self.name = QLabel(part.tile_name)
+        self.name = QLabel()
         self.name.setObjectName("tileName")
         self.name.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.name.setWordWrap(True)
         lay.addWidget(self.pic)
         lay.addWidget(self.name, 1)
         self._press = None
+        self.retranslate()
         self.refresh()
+
+    def retranslate(self):
+        part = self.part
+        self.setToolTip(f"<b>{part.tr_name}</b><br>{part.tr_description}<br><i>" +
+                        tr("Click, then click on the sheet — or drag it there.") + "</i>")
+        self.name.setText(part.tr_tile_name)
 
     def refresh(self):
         self.pic.setPixmap(S.pixmap(self.part.key, ICON_W, ICON_H, QColor(theme.INK), QColor(theme.PANEL)))
@@ -87,7 +93,7 @@ class Category(QWidget):
         self.header.setObjectName("categoryHeader")
         self.header.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.header.setArrowType(Qt.DownArrow)
-        self.header.setText(name.replace("&", "&&"))   # a single & would vanish on Windows
+        self.header.setText(tr(name).replace("&", "&&"))   # a single & would vanish on Windows
         self.header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.header.clicked.connect(self.toggle)
         lay.addWidget(self.header)
@@ -104,6 +110,11 @@ class Category(QWidget):
             self.tiles.append(t)
         self._layout(self.tiles)
         self.open = True
+
+    def retranslate(self):
+        self.header.setText(tr(self.name).replace("&", "&&"))
+        for t in self.tiles:
+            t.retranslate()
 
     def _layout(self, tiles):
         for t in self.tiles:
@@ -123,8 +134,8 @@ class Category(QWidget):
 
     def filter(self, text: str) -> bool:
         t = text.lower().strip()
-        shown = [tile for tile in self.tiles if not t or t in tile.part.name.lower()
-                 or t in tile.part.keywords or t in self.name.lower()]
+        cat = (self.name + " " + tr(self.name)).lower()
+        shown = [tile for tile in self.tiles if not t or t in tile.part.search_text or t in cat]
         self._layout(shown)
         self.setVisible(bool(shown))
         if t:
@@ -146,12 +157,11 @@ class Gallery(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        h = QLabel("Parts")
-        h.setObjectName("sectionHeader")
-        lay.addWidget(h)
+        self.header = QLabel()
+        self.header.setObjectName("sectionHeader")
+        lay.addWidget(self.header)
         self.search = QLineEdit()
         self.search.setObjectName("filter")
-        self.search.setPlaceholderText("Search parts (e.g. LED, 555, switch)")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._filter)
         lay.addWidget(self.search)
@@ -167,7 +177,7 @@ class Gallery(QWidget):
             cat = Category(name, parts, self.picked.emit)
             self.categories.append(cat)
             v.addWidget(cat)
-        self.empty = QLabel("No parts match.")
+        self.empty = QLabel()
         self.empty.setObjectName("hint")
         self.empty.setAlignment(Qt.AlignCenter)
         self.empty.hide()
@@ -175,6 +185,15 @@ class Gallery(QWidget):
         v.addStretch(1)
         scroll.setWidget(inner)
         lay.addWidget(scroll, 1)
+        self.retranslate()
+
+    def retranslate(self):
+        self.header.setText(tr("Parts"))
+        self.search.setPlaceholderText(tr("Search parts (e.g. LED, 555, switch)"))
+        self.empty.setText(tr("No parts match."))
+        for c in self.categories:
+            c.retranslate()
+        self._filter(self.search.text())
 
     def _filter(self, text):
         any_shown = False

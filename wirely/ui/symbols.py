@@ -11,6 +11,7 @@ import math
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 
+from ..i18n import tr
 from ..model import parts as P
 from ..model.circuit import transform
 
@@ -1284,7 +1285,8 @@ DRAW.update({
 
 
 def note_lines(props):
-    return (str(props.get("text", "")) or " ").split("\n")
+    # the notes that come with the examples are shown in the chosen language; anything a person typed is left alone
+    return tr(str(props.get("text", ""))).split("\n") if props.get("text") else [" "]
 
 
 def _note(c):

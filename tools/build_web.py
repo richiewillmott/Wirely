@@ -5,6 +5,7 @@
 
 What goes in the folder:
   index.html, app.js, style.css, …   the page (from web/)
+  locale/                             the translations (one JSON file per language), shared with the desktop app
   wirely-py.zip                       Wirely's Python code: wirely/model, wirely/sim and the drawing / sheet code
                                       from wirely/ui, plus web/py (the Qt stand-in and the glue)
   examples/                           the example circuits and a list of them
@@ -39,6 +40,11 @@ def build_zip(path):
         def add(src, arc):
             z.write(src, arc)
         add(os.path.join(ROOT, "wirely", "__init__.py"), "wirely/__init__.py")
+        add(os.path.join(ROOT, "wirely", "i18n.py"), "wirely/i18n.py")
+        loc = os.path.join(ROOT, "wirely", "locale")             # the translations (Spanish, German, Japanese)
+        for name in sorted(os.listdir(loc)) if os.path.isdir(loc) else []:
+            if name.endswith(".json"):
+                add(os.path.join(loc, name), f"wirely/locale/{name}")
         for sub in ("model", "sim"):
             d = os.path.join(ROOT, "wirely", sub)
             for name in sorted(os.listdir(d)):
@@ -82,6 +88,9 @@ def main(argv=None):
         with open(sw, "w", encoding="utf-8") as fh:
             fh.write(text)
     build_zip(os.path.join(out, "wirely-py.zip"))
+    # the page reads the same translations for its own text (and for the loading messages, before Python is up)
+    if os.path.isdir(os.path.join(ROOT, "wirely", "locale")):
+        shutil.copytree(os.path.join(ROOT, "wirely", "locale"), os.path.join(out, "locale"))
     ex_out = os.path.join(out, "examples")
     os.makedirs(ex_out)
     names = []

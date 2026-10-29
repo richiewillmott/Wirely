@@ -58,6 +58,8 @@ answers.
 - **Every part type explained** — double-click a part and choose its type: a line underneath says what it's
   good for (e.g. why you'd pick an AO3400 over a 2N7002).
 - **Export** — PNG, SVG and PDF (always on white paper), and a parts list you can copy or save as CSV.
+- **In your language** — a **Language** menu switches the whole program, live, between English, Español, Deutsch
+  and 日本語 (desktop app and website). Saved circuits work in any language.
 - **Feels modern** — a flat look with light and dark themes, a splash screen, and an installer that makes
   `.wirely` files open in Wirely with their own icon.
 
@@ -288,7 +290,9 @@ instead.
 
 The circuit model (`wirely/model`) and the solver (`wirely/sim`) are plain Python with no Qt, so they can be
 tested on their own; the user interface is in `wirely/ui`. The README pictures are made by
-`tools/readme_media.py`. The browser version lives in `web/`: `web/py/qtshim.py` stands in for the parts of Qt the
+`tools/readme_media.py`. Translations are plain JSON catalogues in `wirely/locale/` (the English text in the code
+is the key); `python tools/i18n.py` lists anything missing, and to add a language you add a catalogue and one line
+in `wirely/i18n.py`. The browser version lives in `web/`: `web/py/qtshim.py` stands in for the parts of Qt the
 sheet and drawing code use (recording the drawing for the page to replay on a canvas), and
 `python tools/build_web.py` builds the site (see BUILDING.md). See [BUILDING.md](BUILDING.md) for building the installers and how the automatic
 GitHub builds work, and [CHANGES.md](CHANGES.md) for what's new.

@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout,
                                QWidget)
 
+from ..i18n import tr
 from ..model.units import fmt
 from ..sim.audio import frequency
 from . import theme
@@ -76,48 +77,68 @@ class GraphPanel(QWidget):
         v.setSpacing(4)
         top = QHBoxLayout()
         top.setSpacing(8)
-        title = QLabel("Graph")
-        title.setObjectName("sectionHeader")
-        title.setContentsMargins(0, 0, 0, 0)
-        top.addWidget(title)
-        self.chips = QLabel("Put a graph probe (Meters & probes) on a wire, then press Play.")
+        self.title = QLabel()
+        self.title.setObjectName("sectionHeader")
+        self.title.setContentsMargins(0, 0, 0, 0)
+        top.addWidget(self.title)
+        self.chips = QLabel()
         self.chips.setObjectName("muted")
         self.chips.setTextFormat(Qt.RichText)
         top.addWidget(self.chips, 1)
         self.tbox = QComboBox()
         for name, _v in TIMEBASES:
-            self.tbox.addItem(name)
-        self.tbox.setToolTip("Time per square across")
+            self.tbox.addItem(tr(name))
         self.tbox.currentIndexChanged.connect(lambda _i: self.plot.update())
         self.vbox = QComboBox()
         for name, _v in VOLTS:
-            self.vbox.addItem(name)
-        self.vbox.setToolTip("Volts per square up")
+            self.vbox.addItem(tr(name))
         self.vbox.currentIndexChanged.connect(lambda _i: self.plot.update())
-        top.addWidget(QLabel("Time"))
+        self.time_label = QLabel()
+        self.volts_label = QLabel()
+        top.addWidget(self.time_label)
         top.addWidget(self.tbox)
-        top.addWidget(QLabel("Volts"))
+        top.addWidget(self.volts_label)
         top.addWidget(self.vbox)
-        clear = QPushButton("Clear")
-        clear.clicked.connect(self.clear)
-        save = QPushButton("Save picture…")
-        save.clicked.connect(self.save_picture)
-        top.addWidget(clear)
-        top.addWidget(save)
-        close = QToolButton()
-        close.setText("✕")
-        close.setToolTip("Hide the graph (View → Graph shows it again)")
-        close.clicked.connect(self.closed.emit)
-        top.addWidget(close)
+        self.clear_btn = QPushButton()
+        self.clear_btn.clicked.connect(self.clear)
+        self.save_btn = QPushButton()
+        self.save_btn.clicked.connect(self.save_picture)
+        top.addWidget(self.clear_btn)
+        top.addWidget(self.save_btn)
+        self.close_btn = QToolButton()
+        self.close_btn.setText("✕")
+        self.close_btn.clicked.connect(self.closed.emit)
+        top.addWidget(self.close_btn)
         v.addLayout(top)
         self.plot = Plot(self)
         v.addWidget(self.plot, 1)
+        self.retranslate()
+
+    def retranslate(self):
+        """Show the panel's words in the chosen language."""
+        self.title.setText(tr("Graph"))
+        self.time_label.setText(tr("Time"))
+        self.volts_label.setText(tr("Volts"))
+        self.clear_btn.setText(tr("Clear"))
+        self.save_btn.setText(tr("Save picture…"))
+        self.close_btn.setToolTip(tr("Hide the graph (View → Graph shows it again)"))
+        self.tbox.setToolTip(tr("Time per square across"))
+        self.vbox.setToolTip(tr("Volts per square up"))
+        for i, (name, _v) in enumerate(TIMEBASES):
+            self.tbox.setItemText(i, tr(name))
+        for i, (name, _v) in enumerate(VOLTS):
+            self.vbox.setItemText(i, tr(name))
+        if self.traces:
+            self._update_chips()
+        else:
+            self.chips.setText(tr("Put a graph probe (Meters & probes) on a wire, then press Play."))
+        self.plot.update()
 
     # ------------------------------------------------------------------ data
     def clear(self):
         self.traces = {}
         self.t_now = 0.0
-        self.chips.setText("Put a graph probe (Meters & probes) on a wire, then press Play.")
+        self.chips.setText(tr("Put a graph probe (Meters & probes) on a wire, then press Play."))
         self.plot.update()
 
     def add_samples(self, samples, t_now):
@@ -129,7 +150,7 @@ class GraphPanel(QWidget):
         self.plot.update()
 
     def has_data(self):
-        return any(tr.t for tr in self.traces.values())
+        return any(trace.t for trace in self.traces.values())
 
     # ------------------------------------------------------------------ scales
     def timebase(self):
@@ -152,8 +173,8 @@ class GraphPanel(QWidget):
     def volt_range(self, t0, t1):
         vdiv = VOLTS[self.vbox.currentIndex()][1]
         lo, hi = 0.0, 0.0
-        for tr in self.traces.values():
-            _ts, vs = tr.window(t0, t1)
+        for trace in self.traces.values():
+            _ts, vs = trace.window(t0, t1)
             if vs:
                 lo, hi = min(lo, min(vs)), max(hi, max(vs))
         if vdiv is not None:
@@ -172,14 +193,14 @@ class GraphPanel(QWidget):
             return
         bits = []
         for ch in sorted(self.traces):
-            tr = self.traces[ch]
-            if not tr.v:
+            trace = self.traces[ch]
+            if not trace.v:
                 continue
             col = CHANNEL_RGB.get(ch, "#e0a800")
-            ts, vs = tr.window(self.t_now - max(5.0, 10 * self.timebase()), self.t_now)
+            ts, vs = trace.window(self.t_now - max(5.0, 10 * self.timebase()), self.t_now)
             f = frequency(ts, vs)
             extra = f" · {fmt(f, 'Hz')}" if f else ""
-            now = tr.v[-1] if abs(tr.v[-1]) >= 1e-3 else 0.0
+            now = trace.v[-1] if abs(trace.v[-1]) >= 1e-3 else 0.0
             bits.append(f"<span style='color:{col}; font-weight:700'>■ {ch}</span> "
                         f"<span style='color:{theme.TEXT}'>{fmt(now, 'V')}{extra}</span>")
         self.chips.setText("&nbsp;&nbsp;&nbsp;".join(bits))
@@ -215,9 +236,9 @@ class GraphPanel(QWidget):
         p.drawText(QRectF(area.left(), area.bottom() + 4, area.width() / 2, 14), Qt.AlignLeft,
                    f"{fmt(t0, 's')}")
         p.drawText(QRectF(area.center().x(), area.bottom() + 4, area.width() / 2, 14), Qt.AlignRight,
-                   f"{fmt(t1, 's')}   ({fmt(tdiv, 's')} per square)")
+                   f"{fmt(t1, 's')}   " + tr("({t} per square)", t=fmt(tdiv, "s")))
         if not self.traces:
-            p.drawText(area, Qt.AlignCenter, "No signals yet — put a graph probe on a wire and press Play.")
+            p.drawText(area, Qt.AlignCenter, tr("No signals yet — put a graph probe on a wire and press Play."))
             return
 
         def X(t):
@@ -269,10 +290,10 @@ class GraphPanel(QWidget):
             p.drawLine(QPointF(mouse.x(), area.top()), QPointF(mouse.x(), area.bottom()))
             lines = [f"t = {fmt(t, 's')}"]
             for ch in sorted(self.traces):
-                tr = self.traces[ch]
-                i = bisect.bisect_left(tr.t, t)
-                if 0 < i < len(tr.t):
-                    lines.append(f"{ch}: {fmt(tr.v[i], 'V')}")
+                trace = self.traces[ch]
+                i = bisect.bisect_left(trace.t, t)
+                if 0 < i < len(trace.t):
+                    lines.append(f"{ch}: {fmt(trace.v[i], 'V')}")
             box = QRectF(mouse.x() + 8, area.top() + 6, 92, 14 * len(lines) + 8)
             if box.right() > area.right():
                 box.moveRight(mouse.x() - 8)
@@ -286,7 +307,7 @@ class GraphPanel(QWidget):
                 p.drawText(QRectF(box.left() + 6, box.top() + 4 + 14 * k, box.width() - 8, 14), Qt.AlignLeft, line)
 
     def save_picture(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save graph", "graph.png", "PNG picture (*.png)")
+        path, _ = QFileDialog.getSaveFileName(self, tr("Save graph"), "graph.png", tr("PNG picture") + " (*.png)")
         if path:
             if not path.lower().endswith(".png"):
                 path += ".png"

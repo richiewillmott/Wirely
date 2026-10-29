@@ -26,7 +26,7 @@ def label_lines(comp: Component) -> list[str]:
     for p in comp.part.props:
         if p.on_label:
             v = comp.value(p.key)
-            vals.append(fmt(v, p.unit) if p.kind == "number" else str(v))
+            vals.append(fmt(v, p.unit) if p.kind == "number" else P.choice_text(v) if p.kind == "choice" else str(v))
     if vals:
         lines.append(" ".join(vals))
     return lines
